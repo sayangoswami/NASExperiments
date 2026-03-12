@@ -1,0 +1,20 @@
+[caller_settings.pyrawhash]
+# nothing to do here
+
+[mapper_settings.pyrawhash]
+# Update the following path
+input = "/scratch/NASExperiments/tmp/zymo.ind" 
+threads = 16
+x = "viral"
+
+[[regions]]
+name = "analysis"
+min_chunks = 1
+max_chunks = 2
+targets = []
+single_on = "stop_receiving"
+multi_on =  "stop_receiving"
+single_off = "stop_receiving"
+multi_off = "stop_receiving"
+no_seq = "proceed"
+no_map = "unblock"

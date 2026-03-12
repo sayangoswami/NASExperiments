@@ -1,0 +1,19 @@
+[caller_settings.dorado]
+config = "dna_r9.4.1_450bps_fast"
+address = "ipc:///tmp/.guppy/5555"
+
+[mapper_settings.pyspumoni]
+port = 5555
+min_exact_match = 0.4
+
+[[regions]]
+name = "analysis"
+min_chunks = 1
+max_chunks = 2
+targets = []
+single_on = "stop_receiving"
+multi_on =  "stop_receiving"
+single_off = "stop_receiving"
+multi_off = "stop_receiving"
+no_seq = "proceed"
+no_map = "unblock"

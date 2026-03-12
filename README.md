@@ -17,7 +17,7 @@
 	chmod +x setup.sh
 	./setup.sh
 	```
-5.  By default, `ont-pybasecall-client-lib=7.6.8` and `ont-pyguppy-client-lib=6.5.7` are installed in the environment. To check if they are compatible with the basecaller vesion, run `/opt/ont/dorado/bin/dorado_basecall_server --version` and, if required, download the appropriate client library from [here if you have Dorado 7.3.0 onwards](https://pypi.org/project/ont-pybasecall-client-lib/) or [here if you have Guppy or Dorado upto version 7.2.x](https://pypi.org/project/ont-pyguppy-client-lib/).
+5.  By default, `ont-pybasecall-client-lib=7.11.2` and `ont-pyguppy-client-lib=6.5.7` are installed in the environment. To check if they are compatible with the basecaller vesion, run `/opt/ont/dorado/bin/dorado_basecall_server --version` and, if required, download the appropriate client library from [here if you have Dorado 7.3.0 onwards](https://pypi.org/project/ont-pybasecall-client-lib/) or [here if you have Guppy or Dorado upto version 7.2.x](https://pypi.org/project/ont-pyguppy-client-lib/).
 
 
 ## Running experiments on basecalled reads

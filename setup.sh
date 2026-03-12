@@ -4,7 +4,7 @@ export EXPDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd
 cd $EXPDIR
 
 # Create directory structure
-mkdir code log out results tmp
+mkdir code logs out results tmp
 
 # setup minimap2
 cd $EXPDIR/code
