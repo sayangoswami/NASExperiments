@@ -5,8 +5,8 @@ set -euo pipefail
 # --- Update INPUT_SIGNAL and CONFIG_TOML ---
 # the following lines can be files or directories
 INPUT_SIGNAL=(
-    "/data/SimulatedDatasets/Zymo/signals/Sigs0_450.blow5"
-    "/data/SimulatedDatasets/Zymo/signals/Sigs1_450.blow5"
+    "data/simulated/Zymo/signals/Sigs0_450.blow5"
+    "data/simulated/Zymo/signals/Sigs1_450.blow5"
 )
 # the folloing is the path to Readfish's config.
 CONFIG_TOML=/scratch/NASExperiments/configs/rf_sp_zymo.toml
@@ -38,7 +38,9 @@ for f in "${INPUT_SIGNAL[@]}"; do
     args+=(--input "$f")
 done
 
-CLIENT_CMD="readfish targets --wait-for-ready 5 --toml $CONFIG_TOML --port 50051 --device MN12345 --log-file $CLIENT_LOG --experiment-name 'Readfish_$TIMESTAMP'"
+CLIENT_CMD="readfish targets --wait-for-ready 5 \
+    --toml $CONFIG_TOML --port 50051 --device MN12345 \
+    --log-file $CLIENT_LOG --experiment-name 'Readfish_$TIMESTAMP'"
 
 
 # Cleanup handler for Ctrl+C or errors
@@ -55,6 +57,28 @@ cleanup() {
     fi
 }
 trap cleanup EXIT INT TERM
+
+# if the system dorado server is not running, and I have a local dorado, run it in the background
+LOCAL_DORADO="$CODEDIR/ont-dorado-server/bin/dorado_basecall_server"
+
+if pgrep -f -- "dorado_basecall_server" > /dev/null; then
+    echo "System dorado server is already running"
+elif [[ -x "$LOCAL_DORADO" ]]; then
+    echo "Dorado is not running, starting local dorado server..."
+    "$LOCAL_DORADO" --log_path $LOGDIR/dorado \
+        --ipc_threads 3 --port /tmp/.guppy/5555 \
+        --dorado_download_path $TMPDIR/dorado-models --device auto 2>&1 &
+    DORADO_PID=$!
+    sleep 2
+    trap "kill $DORADO_PID; cleanup" EXIT INT TERM
+else
+    echo "System dorado server is not running, and local binary is missing: $LOCAL_DORADO"
+    echo " Do you wish to continue without dorado? (y/n)"
+    read -r answer
+    if [[ "$answer" != "y" ]]; then
+        exit 1
+    fi
+fi
 
 # Start server in background
 echo "🚀 Starting server..."
