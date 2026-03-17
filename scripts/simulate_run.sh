@@ -2,15 +2,6 @@
 # set -x
 set -euo pipefail
 
-# --- Update INPUT_SIGNAL and CONFIG_TOML ---
-# the following lines can be files or directories
-INPUT_SIGNAL=(
-    "data/simulated/Zymo/signals/Sigs0_450.blow5"
-    "data/simulated/Zymo/signals/Sigs1_450.blow5"
-)
-# the folloing is the path to Readfish's config.
-CONFIG_TOML=/scratch/NASExperiments/configs/rf_sp_zymo.toml
-
 # --- Some globals ---
 SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 EXPDIR=`dirname $SCRIPTDIR`
@@ -18,6 +9,17 @@ CODEDIR=$EXPDIR/code
 LOGDIR=$EXPDIR/logs
 OUTDIR=$EXPDIR/results
 TMPDIR=$EXPDIR/tmp
+
+DATADIR=/data/SimulatedDatasets/Zymo/signals
+
+# --- Update INPUT_SIGNAL and CONFIG_TOML ---
+# the following lines can be files or directories
+INPUT_SIGNAL=(
+    "$DATADIR/Sigs0_450.blow5"
+    "$DATADIR/Sigs1_450.blow5"
+)
+# the folloing is the path to Readfish's config.
+CONFIG_TOML=/scratch/NASExperiments/configs/rf_mg_zymo.toml
 
 export PYTHONUNBUFFERED=1
 export MINKNOW_API_USE_LOCAL_TOKEN="no" # to avoid printing a debug error message (non-fatal)

@@ -5,7 +5,7 @@
 export ALL_TASKS="0-2"
 
 # other variables
-export DATADIR=$EXPDIR/data/simulated/Zymo
+export DATADIR=/data/SimulatedDatasets/Zymo
 
 f0() {
     spumoni build -r $DATADIR/Refs1.fasta -M -P -m -o $TMPDIR/zymo
