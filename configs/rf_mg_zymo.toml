@@ -2,9 +2,9 @@
 config = "dna_r9.4.1_450bps_fast"
 address = "ipc:///tmp/.guppy/5555"
 
-[mapper_settings.pyspumoni]
-port = 5555
-min_exact_match = 0.4
+[mapper_settings.metagraphRF]
+# port = 5555
+# min_exact_match = 0.4
 
 [[regions]]
 name = "analysis"

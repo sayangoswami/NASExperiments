@@ -26,23 +26,11 @@ cmake ..
 make -j 8
 
 # setup metagraph
+conda install -c bioconda -c conda-forge metagraph
 cd $EXPDIR/code
-git clone --recursive https://github.com/ratschlab/metagraph.git
-cd metagraph
-
-# install sdsl lite
-git submodule sync
-git submodule update --init --recursive
-
-pushd metagraph/external-libraries/sdsl-lite
-./install.sh $PWD
-popd
-
-mkdir metagraph/build
-cd metagraph/build
-
-cmake ..
-make -j 8
+git clone https://github.com/ratschlab/metagraphRF.git
+cd metagraphRF
+pip install .
 
 # setup spumoni
 cd $EXPDIR/code
