@@ -36,14 +36,17 @@ usage() {
 
 # --- Some globals ---
 export SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+export PATH=$SCRIPTDIR:$PATH
 export EXPDIR=`dirname $SCRIPTDIR`
 export CODEDIR=$EXPDIR/code
 export LOGDIR=$EXPDIR/logs
 export OUTDIR=$EXPDIR/out
 export TMPDIR=$EXPDIR/tmp
+export RESDIR=$EXPDIR/results
 
 export PATH=$EXPDIR/code/minimap2/:$PATH
 export PATH=$EXPDIR/code/collinearity/build/:$PATH
+export PATH=$EXPDIR/code/rawhash2/:$PATH
 export PATH=$EXPDIR/code/metagraph/metagraph/build/:$PATH
 export SPUMONI_BUILD_DIR=$EXPDIR/code/spumoni/build/
 export PATH=$SPUMONI_BUILD_DIR:$PATH
