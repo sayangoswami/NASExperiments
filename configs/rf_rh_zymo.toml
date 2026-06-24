@@ -3,7 +3,7 @@
 
 [mapper_settings.pyrawhash]
 # Update the following path
-input = "/scratch/NASExperiments/tmp/zymo.ind" 
+idx = "/scratch/NASExperiments/tmp/zymo.ind" 
 threads = 16
 x = "viral"
 
