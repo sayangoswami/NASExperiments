@@ -1,0 +1,12 @@
+usage               = "build"
+output_directory    = '/scratch/NASExperiments/tmp'         #all generated output files will be stored here
+log_directory       = '/scratch/NASExperiments/logs'            #all generated log files will be stored here
+
+
+[IBF]
+
+#kmer_size     = X                       #(unsigned integer; default: 13)
+#fragment_size = X                       #(unsigned integer; default: 100000)
+threads       = 8                       #(unsigned integer; default: 3) 
+target_files  = ['/data/SimulatedDatasets/Zymo/Refs1.fasta']
+#deplete_files = ['xxx.fasta', 'xxx.fasta'] 

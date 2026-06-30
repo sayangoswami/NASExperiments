@@ -16,8 +16,8 @@ DATADIR=/data/SimulatedDatasets/Zymo/PromethION_R10.4.1-seq2squiggle/signals/
 # the following lines can be files or directories
 INPUT_SIGNAL=$DATADIR
 PROFILE="dna-r10-prom"
-# the following is the path to Readfish's config.
-CONFIG_TOML=/scratch/NASExperiments/configs/rf_rh_zymo.toml
+# the following is the path to the tool's config. Change as required
+CONFIG_TOML=/scratch/NASExperiments/configs/rf_rb_zymo.toml
 
 export PYTHONUNBUFFERED=1
 export MINKNOW_API_USE_LOCAL_TOKEN="no" # to avoid printing a debug error message (non-fatal)

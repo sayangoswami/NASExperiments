@@ -32,6 +32,17 @@ git clone https://github.com/ratschlab/metagraphRF.git
 cd metagraphRF
 pip install .
 
+# build metagraph from align_refactor branch
+# From https://metagraph.ethz.ch/static/docs/installation.html#install-from-source
+cd $EXPDIR/code
+git clone -b align_refactor --recursive https://github.com/ratschlab/metagraph.git
+cd metagraph
+git submodule update --init --recursive
+mkdir metagraph/build
+cd metagraph/build
+cmake ..
+make -j 16
+
 # setup spumoni
 cd $EXPDIR/code
 git clone --recursive https://github.com/ratschlab/spumoni.git

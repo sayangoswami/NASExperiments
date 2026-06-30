@@ -1,10 +1,17 @@
 [caller_settings.dorado]
-config = "dna_r9.4.1_450bps_fast"
-address = "ipc:///tmp/.guppy/5555"
+config = "dna_r10.4.1_e8.2_400bps_fast@v5.2.0||" #"dna_r9.4.1_450bps_fast"
+address = "ipc:///tmp/.dorado/dorado-basecall-server.sock"
 
 [mapper_settings.metagraphRF]
-# port = 5555
-# min_exact_match = 0.4
+debug_log = "/scratch/NASExperiments/logs/rf_mg_zymo.log"
+port = 5555
+min_exact_match = 0.4
+max_alternative_alignments = 1
+
+# the following parameters are only used in metagraph align_refactor branch
+seed_length = 21
+connect_anchors = false
+extend_chains = false
 
 [[regions]]
 name = "analysis"
