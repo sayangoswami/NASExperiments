@@ -1,0 +1,36 @@
+[caller_settings.sigmoni]
+# nothing to do here
+
+[mapper_settings.sigmoni]
+# Update the following paths
+ref_prefix = "/scratch/NASExperiments/tmp/refs/ref"        # required
+spumoni_path = "/scratch/NASExperiments/code/spumoni/build"         # optional, default: 'spumoni' on PATH
+threads = 16                                # optional, default: 1
+multi = true                               # optional, default: false (binary mode)
+complexity = true                         # this must be set to true
+sig_proc = false                           # optional, default: false
+nbins = 6                                  # optional, default: 6
+threshold = 2.0     # best hit must be 2× stronger than second-best; tune to taste
+
+# b = 100000 # number of bins
+# sp = true
+# read-prefix = READ_PREFIX
+# max-chunks = MAX_CHUNK
+# no-classify = true
+# reclassify = true 
+# a = ANNOTATIONS
+# thresh = THRESHOLD
+# multi = true 
+# complexity = true
+
+[[regions]]
+name = "analysis"
+min_chunks = 1
+max_chunks = 2
+targets = []
+single_on = "stop_receiving"
+multi_on =  "stop_receiving"
+single_off = "stop_receiving"
+multi_off = "stop_receiving"
+no_seq = "proceed"
+no_map = "unblock"
