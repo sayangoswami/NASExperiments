@@ -268,11 +268,42 @@ def load_plugin(module_name: str, plugin_args: str, debug_log: Optional[str]):
         else:
             logger.warning("Ignoring malformed plugin arg token: %s", token)
 
+    logger.info("Importing module %s ...", module_name)
     mod = importlib.import_module(module_name)
+    logger.info("Module %s imported.", module_name)
+
+    logger.info("Getting Aligner class from %s ...", module_name)
     aligner_cls = getattr(mod, "Aligner")
+    logger.info("Got Aligner class: %r", aligner_cls)
+
     logger.info("Instantiating %s.Aligner with kwargs=%s", module_name, kwargs)
-    aligner = aligner_cls(debug_log=debug_log, **kwargs)
-    aligner.validate()
+    t0 = time.perf_counter()
+    if debug_log is not None:
+        logger.info("Trying with debug_log=%r ...", debug_log)
+        try:
+            aligner = aligner_cls(debug_log=debug_log, **kwargs)
+            logger.info("Instantiated with debug_log in %.2fs", time.perf_counter() - t0)
+        except TypeError:
+            logger.warning(
+                "%s.Aligner does not accept debug_log — argument ignored.", module_name
+            )
+            logger.info("Retrying without debug_log ...")
+            aligner = aligner_cls(**kwargs)
+            logger.info("Instantiated without debug_log in %.2fs", time.perf_counter() - t0)
+    else:
+        logger.info("Calling %s.Aligner(**kwargs) ...", module_name)
+        aligner = aligner_cls(**kwargs)
+        logger.info("%s.Aligner instantiated in %.2fs", module_name, time.perf_counter() - t0)
+
+    if hasattr(aligner, "validate"):
+        logger.info("Running %s.Aligner.validate() ...", module_name)
+        t0 = time.perf_counter()
+        aligner.validate()
+        logger.info("%s.Aligner.validate() completed in %.2fs", module_name, time.perf_counter() - t0)
+    else:
+        logger.info("%s.Aligner has no validate() method, skipping.", module_name)
+
+    logger.info("Plugin %s ready.", module_name)
     return aligner
 
 

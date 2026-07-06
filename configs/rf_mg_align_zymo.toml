@@ -1,0 +1,27 @@
+[caller_settings.dorado]
+config = "dna_r10.4.1_e8.2_400bps_fast@v5.2.0||"
+address = "ipc:///var/lib/minknow/data/.dorado/dorado-basecall-server.sock"
+
+[mapper_settings.pymetagraph]
+method = "align"
+input = "/scratch/NASExperiments/tmp/mg_zymo.dbg"
+annotator = "/scratch/NASExperiments/tmp/mg_zymo.column.annodbg"
+threads = 16
+seed_length = 21
+max_alternative_alignments = 1     # default - 1
+max_num_nodes_per_seq_char = 10     # default - 10
+min_exact_match = 0.4     # default - 0
+connect_anchors = true     # default - true
+extend_chains = true     # default - true
+
+[[regions]]
+name = "analysis"
+min_chunks = 1
+max_chunks = 2
+targets = []
+single_on = "stop_receiving"
+multi_on =  "stop_receiving"
+single_off = "stop_receiving"
+multi_off = "stop_receiving"
+no_seq = "proceed"
+no_map = "unblock"

@@ -43,15 +43,89 @@ export LOGDIR=$EXPDIR/logs
 export OUTDIR=$EXPDIR/out
 export TMPDIR=$EXPDIR/tmp
 export RESDIR=$EXPDIR/results
+export CONFDIR=$EXPDIR/configs
 
-export PATH=$EXPDIR/code/minimap2/:$PATH
-export PATH=$EXPDIR/code/collinearity/build/:$PATH
-export PATH=$EXPDIR/code/rawhash2/:$PATH
-export PATH=$EXPDIR/code/metagraph/metagraph/build/:$PATH
-export SPUMONI_BUILD_DIR=$EXPDIR/code/spumoni/build/
+export PATH=$CODEDIR/minimap2/:$PATH
+export PATH=$CODEDIR/collinearity/build/:$PATH
+export PATH=$CODEDIR/rawhash2/:$PATH
+export PATH=$CODEDIR/metagraph/metagraph/build/:$PATH
+export SPUMONI_BUILD_DIR=$CODEDIR/spumoni/build/
 export PATH=$SPUMONI_BUILD_DIR:$PATH
+export PATH=$CODEDIR/ReadBouncer/build/main/:$PATH
 export TIMESTAMP=$(date +"%b%d_%H%M%S")
-alias measure="/usr/bin/time -f \"CPU=%P\nElapsed=%E\nMaxRSS=%M KB\""
+# alias measure="/usr/bin/time -f \"CPU=%P\nElapsed=%E\nMaxRSS=%M KB\""
+
+# --- Recursively list a PID and all its descendants ---
+_get_descendants() {
+    local pid=$1
+    local children
+    echo "$pid"
+    children=$(pgrep -P "$pid" 2>/dev/null)
+    local c
+    for c in $children; do
+        _get_descendants "$c"
+    done
+}
+
+# --- measure: runs a command, tracks peak process-tree PSS and elapsed time ---
+measure() {
+    if [ ! -r /proc/self/smaps_rollup ]; then
+        echo "Warning: /proc/*/smaps_rollup not available on this kernel. Falling back to /usr/bin/time (child RSS may be undercounted)." >&2
+        /usr/bin/time -f "CPU=%P\nElapsed=%E\nMaxRSS=%M KB" "$@"
+        return $?
+    fi
+
+    local start_ns end_ns elapsed
+    local peak_kb=0
+    local peak_cpu_ticks=0
+    local clk_tck
+    clk_tck=$(getconf CLK_TCK)
+
+    start_ns=$(date +%s%N)
+
+    "$@" &
+    local root_pid=$!
+
+    while kill -0 "$root_pid" 2>/dev/null; do
+        local pids sum_pss=0 sum_ticks=0 p pss utime stime stat_line
+
+        pids=$(_get_descendants "$root_pid")
+
+        for p in $pids; do
+            if [[ -r /proc/$p/smaps_rollup ]]; then
+                pss=$(awk '/^Pss:/{print $2; exit}' /proc/$p/smaps_rollup 2>/dev/null)
+                [[ -n "$pss" ]] && sum_pss=$(( sum_pss + pss ))
+            fi
+            if [[ -r /proc/$p/stat ]]; then
+                stat_line=$(cat /proc/$p/stat 2>/dev/null)
+                utime=$(awk '{print $14}' <<< "$stat_line")
+                stime=$(awk '{print $15}' <<< "$stat_line")
+                [[ -n "$utime" && -n "$stime" ]] && sum_ticks=$(( sum_ticks + utime + stime ))
+            fi
+        done
+
+        (( sum_pss > peak_kb )) && peak_kb=$sum_pss
+        (( sum_ticks > peak_cpu_ticks )) && peak_cpu_ticks=$sum_ticks
+
+        sleep 0.1
+    done
+
+    wait "$root_pid"
+    local exit_code=$?
+
+    end_ns=$(date +%s%N)
+    elapsed=$(awk -v s="$start_ns" -v e="$end_ns" 'BEGIN{printf "%.3f", (e-s)/1e9}')
+    local cpu_pct
+    cpu_pct=$(awk -v ticks="$peak_cpu_ticks" -v clk="$clk_tck" -v el="$elapsed" \
+        'BEGIN{ if (el>0) printf "%.0f%%", (ticks/clk)/el*100; else print "0%" }')
+
+    echo "CPU=${cpu_pct}"
+    echo "Elapsed=${elapsed}s"
+    echo "MaxRSS(PSS)=${peak_kb} KB"
+    echo "ExitCode=${exit_code}"
+
+    return $exit_code
+}
 
 # --- Parse command-line arguments ---
 TASKS_NAME=""
