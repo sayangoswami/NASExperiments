@@ -105,6 +105,51 @@ import numpy as np
 import glob
 from concurrent.futures import ThreadPoolExecutor, Future
 
+import os
+
+def _get_descendant_pids(pid: int) -> List[int]:
+    """Recursively find descendant PIDs via /proc/<pid>/task/*/children."""
+    children: List[int] = []
+    try:
+        task_dir = f"/proc/{pid}/task"
+        for tid in os.listdir(task_dir):
+            children_file = f"{task_dir}/{tid}/children"
+            try:
+                with open(children_file) as f:
+                    kids = [int(x) for x in f.read().split()]
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            children.extend(kids)
+            for k in kids:
+                children.extend(_get_descendant_pids(k))
+    except (FileNotFoundError, ProcessLookupError):
+        pass
+    return children
+
+
+def _read_pss_kb(pid: Optional[int] = None) -> Optional[int]:
+    """
+    Sum PSS (KB) for a process and all its descendants via smaps_rollup.
+    Returns None if unavailable (non-Linux / old kernel) so callers can
+    degrade gracefully instead of crashing mid-benchmark.
+    """
+    if pid is None:
+        pid = os.getpid()
+    pids = [pid] + _get_descendant_pids(pid)
+    total = 0
+    found_any = False
+    for p in pids:
+        try:
+            with open(f"/proc/{p}/smaps_rollup") as f:
+                for line in f:
+                    if line.startswith("Pss:"):
+                        total += int(line.split()[1])
+                        found_any = True
+                        break
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return total if found_any else None
+
 logger = logging.getLogger("benchmark_aligner")
 
 # ---------------------------------------------------------------------------
@@ -277,6 +322,7 @@ def load_plugin(module_name: str, plugin_args: str, debug_log: Optional[str]):
     logger.info("Got Aligner class: %r", aligner_cls)
 
     logger.info("Instantiating %s.Aligner with kwargs=%s", module_name, kwargs)
+    mem_before_kb = _read_pss_kb()
     t0 = time.perf_counter()
     if debug_log is not None:
         logger.info("Trying with debug_log=%r ...", debug_log)
@@ -294,6 +340,9 @@ def load_plugin(module_name: str, plugin_args: str, debug_log: Optional[str]):
         logger.info("Calling %s.Aligner(**kwargs) ...", module_name)
         aligner = aligner_cls(**kwargs)
         logger.info("%s.Aligner instantiated in %.2fs", module_name, time.perf_counter() - t0)
+    
+    load_s = time.perf_counter() - t0
+    mem_after_kb = _read_pss_kb()
 
     if hasattr(aligner, "validate"):
         logger.info("Running %s.Aligner.validate() ...", module_name)
@@ -302,9 +351,18 @@ def load_plugin(module_name: str, plugin_args: str, debug_log: Optional[str]):
         logger.info("%s.Aligner.validate() completed in %.2fs", module_name, time.perf_counter() - t0)
     else:
         logger.info("%s.Aligner has no validate() method, skipping.", module_name)
+    
+    index_load_stats = {
+        "load_s":            round(load_s, 3),
+        "mem_before_kb":      mem_before_kb,
+        "mem_after_kb":       mem_after_kb,
+        "mem_delta_kb":       (mem_after_kb - mem_before_kb)
+                               if (mem_before_kb is not None and mem_after_kb is not None)
+                               else None,
+    }
 
     logger.info("Plugin %s ready.", module_name)
-    return aligner
+    return aligner, index_load_stats
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +893,7 @@ def run_benchmark(
     truncate_signals: Optional[int]           = None,
     truncate_bases:   Optional[int]           = None,
     basecall_cfg:     Optional[BasecallConfig] = None,
+    index_load_stats: Optional[dict] = None,
 ) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -904,6 +963,8 @@ def run_benchmark(
     # When basecalling on the fly, reads arrive at the aligner as sequences.
     effective_input_type = "fasta" if basecall_client is not None else input_type
 
+    peak_mem_kb = (index_load_stats or {}).get("mem_after_kb") or 0
+
     try:
         with open(per_read_path,  "w", newline="") as prf, \
              open(batch_log_path, "w", newline="") as blf:
@@ -920,6 +981,7 @@ def run_benchmark(
                 "throughput_reads_per_s",
                 "mean_latency_s", "median_latency_s",
                 "p95_latency_s", "p99_latency_s",
+                "mem_before_kb", "mem_after_kb", "mem_delta_kb", "mem_peak_kb_so_far",
             ], delimiter="\t")
             bl_writer.writeheader()
 
@@ -935,6 +997,7 @@ def run_benchmark(
                     )):
 
                 n_reads = len(batch)
+                mem_before_batch_kb = _read_pss_kb()
                 t_batch_start   = time.perf_counter()
                 wall_time_start = time.time()
 
@@ -954,6 +1017,19 @@ def run_benchmark(
                 # When prefetch overlap is active, basecall_s for batch N was
                 # spent concurrently with alignment of batch N-1, so total_s
                 # reflects the true wall-clock cost of this batch.
+
+                mem_after_batch_kb = _read_pss_kb()
+
+                if mem_before_batch_kb is not None:
+                    peak_mem_kb = max(peak_mem_kb, mem_before_batch_kb)
+                if mem_after_batch_kb is not None:
+                    peak_mem_kb = max(peak_mem_kb, mem_after_batch_kb)
+
+                mem_delta_kb = (
+                    (mem_after_batch_kb - mem_before_batch_kb)
+                    if (mem_before_batch_kb is not None and mem_after_batch_kb is not None)
+                    else None
+                )
 
                 n_results = len(results)
                 for i, result in enumerate(results):
@@ -1022,6 +1098,10 @@ def run_benchmark(
                     "median_latency_s":       round(float(np.median(lat)),         6),
                     "p95_latency_s":          round(float(np.percentile(lat, 95)), 6),
                     "p99_latency_s":          round(float(np.percentile(lat, 99)), 6),
+                    "mem_before_kb":          mem_before_batch_kb,
+                    "mem_after_kb":           mem_after_batch_kb,
+                    "mem_delta_kb":           mem_delta_kb,
+                    "mem_peak_kb_so_far":     peak_mem_kb,
                 }
                 bl_writer.writerow(bl_row)
 
@@ -1060,6 +1140,10 @@ def run_benchmark(
         "total_reads":      total_reads,
         "total_mapped":     total_mapped,
         "map_rate":         round(total_mapped / total_reads, 4) if total_reads else 0.0,
+        "index_load_s":         (index_load_stats or {}).get("load_s"),
+        "index_load_mem_kb":    (index_load_stats or {}).get("mem_delta_kb"),
+        "peak_mem_kb":          peak_mem_kb,
+        "final_batch_mem_kb":   mem_after_batch_kb,  # steady-state, after last batch
     }
     summary_path = outdir / f"{tool}_{dataset}_summary.json"
     with open(summary_path, "w") as fh:
@@ -1197,7 +1281,7 @@ def main():
     tool     = args.tool or args.plugin
     outdir   = Path(args.output)
     manifest = load_manifest(args.manifest) if args.manifest else None
-    aligner  = load_plugin(args.plugin, args.plugin_args,
+    aligner, index_load_stats  = load_plugin(args.plugin, args.plugin_args,
                            getattr(args, "debug_log", None))
 
     basecall_cfg = None
@@ -1221,6 +1305,7 @@ def main():
         truncate_signals=args.truncate_signals,
         truncate_bases=args.truncate_bases,
         basecall_cfg=basecall_cfg,
+        index_load_stats=index_load_stats,
     )
 
 
