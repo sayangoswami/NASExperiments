@@ -194,7 +194,9 @@ def basecall(args: argparse.Namespace) -> int:
     if > 0, exit code 1 otherwise).
     """
     # ── Connect ───────────────────────────────────────────────────────────────
-    client = PyBasecallClient(address=args.address, config=args.config)
+    client = PyBasecallClient(address=args.address, config=args.config,
+        priority=PyBasecallClient.high_priority,
+        client_name="NASExperiments_basecall")
     client.connect()
     # if not client.connect():
     #     logging.error("Could not connect to Dorado server at %s", args.address)
