@@ -195,7 +195,7 @@ if [[ ${#BLOW5_LIST[@]} -eq 0 ]]; then
     exit 1
 fi
 
-slow5tools merge \
+slow5tools merge -a \
     --output "$OUTPUT" \
     --threads "$(nproc)" \
     "${BLOW5_LIST[@]}"

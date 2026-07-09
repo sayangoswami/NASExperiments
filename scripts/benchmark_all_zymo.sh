@@ -130,3 +130,77 @@ f4() {
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE
 }
+
+f5() {
+    echo "Benchmarking readbouncer for Zymo.."
+    
+    pl_args="\
+    target_files=$TMPDIR/Refs1.ibf \
+    threads=16"
+    
+    benchmark_aligner.py \
+    --input "$SIGS/*.blow5" \
+    --plugin pyreadbouncer \
+    --plugin-args "$pl_args" \
+    --output $RES/readbouncer/ \
+    --manifest $MANIFEST \
+    --basecall-address $BASECALL_ADDRESS \
+    --basecall-config  $BASECALL_CONFIG \
+    --truncate-signals $SIGNAL_LENGTH \
+    --batch-size $BATCH_SIZE
+}
+
+f6() {
+    echo "Benchmarking collinearity for Zymo.."
+    
+    pl_args="\
+    input=$TMPDIR/Zymo.cidx \
+    n_threads=16"
+    
+    benchmark_aligner.py \
+    --input "$SIGS/*.blow5" \
+    --plugin pycollinearity \
+    --plugin-args "$pl_args" \
+    --output $RES/collinearity/ \
+    --manifest $MANIFEST \
+    --basecall-address $BASECALL_ADDRESS \
+    --basecall-config  $BASECALL_CONFIG \
+    --truncate-signals $SIGNAL_LENGTH \
+    --batch-size $BATCH_SIZE
+}
+
+f7() {
+    echo "Benchmarking rawhash for Zymo.."
+    
+    pl_args="\
+    idx=$TMPDIR/zymo.ind \
+    threads=16 \
+    x=viral"
+    
+    benchmark_aligner.py \
+    --input "$SIGS/*.blow5" \
+    --plugin pyrawhash \
+    --plugin-args "$pl_args" \
+    --output $RES/rawhash/ \
+    --manifest $MANIFEST \
+    --truncate-signals $SIGNAL_LENGTH \
+    --batch-size $BATCH_SIZE
+}
+
+f8() {
+    echo "Benchmarking sigmoni for Zymo.."
+    
+    pl_args="\
+    ref_prefix=$TMPDIR/refs/ref \
+    spumoni_path=$CODEDIR/spumoni/build/ \
+    threads=16"
+    
+    benchmark_aligner.py \
+    --input "$SIGS/*.blow5" \
+    --plugin sigmoni \
+    --plugin-args "$pl_args" \
+    --output $RES/sigmoni/ \
+    --manifest $MANIFEST \
+    --truncate-signals $SIGNAL_LENGTH \
+    --batch-size $BATCH_SIZE
+}

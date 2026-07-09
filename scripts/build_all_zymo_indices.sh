@@ -63,5 +63,6 @@ f6() {
 f7() {
     echo "Building Sigmoni index for Zymo.."
     measure sigmoni-index -p $DATADIR/Refs1.fasta \
-        -o $TMPDIR --spumoni-path $SPUMONI_BUILD_DIR
+        -o $TMPDIR --spumoni-path $SPUMONI_BUILD_DIR \
+        --poremodel $CODEDIR/sigmoni/poremodel/model_r1041_400bps_dm_it2.tsv
 }
