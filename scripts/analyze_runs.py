@@ -93,6 +93,77 @@ import pandas as pd
 
 logger = logging.getLogger("analyse_runs")
 
+# Optional pyarrow backend for faster CSV parsing
+try:
+    import pyarrow  # noqa: F401
+    _HAVE_PYARROW = True
+except ImportError:
+    _HAVE_PYARROW = False
+
+# Pre-compiled regex for stripping _contig_N suffixes
+import re as _re
+_CONTIG_RE = _re.compile(r"_contig_\d+$")
+
+
+def _extract_contig_vectorised(read_id_series: pd.Series) -> pd.Series:
+    """
+    Vectorised extraction of the contig field from read IDs.
+    Both seq2squiggle (4 fields) and squigulator (5 fields) formats are
+    handled by splitting on '!' and taking field [-4].
+    Returns a Series of contig strings (NaN where the format doesn't match).
+    """
+    split = read_id_series.str.split("!")
+    # parts[-4] is always the contig for both formats
+    return split.apply(
+        lambda p: p[-4] if isinstance(p, list) and len(p) >= 4 else None
+    )
+
+
+def _extract_species_vectorised(contig_series: pd.Series) -> pd.Series:
+    """Strip _contig_N suffix and replace underscores with spaces."""
+    return (contig_series
+            .str.replace(_CONTIG_RE, "", regex=True)
+            .str.replace("_", " ", regex=False))
+
+
+def _resolve_labels_vectorised(
+    contig_series: pd.Series,
+    manifest: Optional[Dict[str, int]],
+    community: Optional[int],
+) -> pd.Series:
+    """
+    Vectorised ground-truth resolution. Returns an int8 Series of
+    1 (target), 0 (deplete), or -1 (unknown) for every read.
+
+    Uses pd.Series.map() for O(1) dict lookup per row instead of
+    row-wise apply().
+    """
+    if community is not None:
+        # Whole run is one community — every read gets the same label
+        return pd.Series(int(community), index=contig_series.index, dtype="int8")
+
+    if manifest is None:
+        return pd.Series(-1, index=contig_series.index, dtype="int8")
+
+    # Build lookup series: try exact contig name first
+    labels = contig_series.map(manifest)
+
+    # For misses, try species name (contig minus _contig_N, underscores→spaces)
+    miss = labels.isna()
+    if miss.any():
+        species = _extract_species_vectorised(contig_series[miss])
+        labels[miss] = species.map(manifest)
+
+    # For still-missing, try species with underscores
+    miss = labels.isna()
+    if miss.any():
+        species_u = _extract_species_vectorised(contig_series[miss]).str.replace(" ", "_", regex=False)
+        labels[miss] = species_u.map(manifest)
+
+    # Remaining NaN → -1
+    labels = labels.fillna(-1).astype("int8")
+    return labels
+
 # ---------------------------------------------------------------------------
 # Readfish decision semantics
 # ---------------------------------------------------------------------------
@@ -149,13 +220,35 @@ def parse_read_id(read_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def load_decisions_tsv(tsv_path: str) -> pd.DataFrame:
-    """
-    Load the Readfish per-read decision TSV.
+    # Specify dtypes upfront to avoid pandas inference overhead on large files.
+    # Use pyarrow engine when available for ~2-4x faster parsing.
+    dtype_map = {
+        "client_iteration": "Int32",
+        "read_in_loop":     "Int32",
+        "read_id":          "str",
+        "channel":          "Int32",
+        "seq_len":          "Int32",
+        "counter":          "Int32",
+        "mode":             "category",
+        "decision":         "category",
+        "condition":        "category",
+        "barcode":          "str",
+        "previous_action":  "str",
+        "action_override":  "str",   # read as str, convert below
+        "timestamp":        "float64",
+    }
+    read_kwargs = dict(
+        sep="\t",
+        dtype={k: v for k, v in dtype_map.items() if v != "category"},
+        engine="pyarrow" if _HAVE_PYARROW else "c",
+    )
+    try:
+        df = pd.read_csv(tsv_path, **read_kwargs)
+    except Exception:
+        # pyarrow may reject unknown columns; fall back to c engine
+        read_kwargs["engine"] = "c"
+        df = pd.read_csv(tsv_path, **read_kwargs)
 
-    Columns used downstream:
-        read_id, seq_len, mode, decision, action_override, timestamp
-    """
-    df = pd.read_csv(tsv_path, sep="\t")
     required = {"read_id", "seq_len", "mode", "decision",
                 "action_override", "timestamp"}
     missing = required - set(df.columns)
@@ -165,13 +258,14 @@ def load_decisions_tsv(tsv_path: str) -> pd.DataFrame:
             f"Found: {list(df.columns)}"
         )
     # Normalise types
-    df["seq_len"]        = pd.to_numeric(df["seq_len"], errors="coerce").fillna(0).astype(int)
-    df["timestamp"]      = pd.to_numeric(df["timestamp"], errors="coerce")
-    # action_override may be 'True'/'False' strings or booleans
-    df["action_override"] = df["action_override"].apply(
-        lambda x: str(x).strip().lower() == "true"
-    )
-    df["decision"] = df["decision"].str.strip().str.lower()
+    df["seq_len"]  = pd.to_numeric(df["seq_len"], errors="coerce").fillna(0).astype("int32")
+    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+    # Vectorised bool conversion — no row-wise apply
+    df["action_override"] = df["action_override"].astype(str).str.strip().str.lower() == "true"
+    # category dtype for low-cardinality string columns
+    df["decision"] = df["decision"].astype(str).str.strip().str.lower().astype("category")
+    if "mode" in df.columns:
+        df["mode"] = df["mode"].astype("category")
     logger.info("Loaded %d decision rows from %s", len(df), tsv_path)
     return df
 
@@ -298,13 +392,14 @@ class CommunityRunResult:
 
 
 def analyse_community_run(
-    tsv_path:   str,
-    tool:       str,
-    dataset:    str,
-    outdir:     str,
-    community:  Optional[int] = None,   # set for separate-community runs
-    manifest:   Optional[Dict[str, int]] = None,  # set for mixed-community runs
+    tsv_path:      str,
+    tool:          str,
+    dataset:       str,
+    outdir:        str,
+    community:     Optional[int] = None,
+    manifest:      Optional[Dict[str, int]] = None,
     unblocked_txt: Optional[str] = None,
+    save_per_read: bool = True,
 ) -> Tuple[CommunityRunResult, pd.DataFrame]:
     """
     Analyse a single run.
@@ -333,41 +428,36 @@ def analyse_community_run(
                 len(only_in_txt), len(only_in_tsv)
             )
 
-    # Parse species from read_id
-    parsed = df["read_id"].apply(parse_read_id).apply(pd.Series)
-    df = pd.concat([df, parsed], axis=1)
+    # ── Vectorised read-ID parsing ────────────────────────────────────────
+    # Extract contig and species without row-wise apply()
+    df["contig"]  = _extract_contig_vectorised(df["read_id"])
+    df["species"] = _extract_species_vectorised(df["contig"])
 
-    # Resolve ground truth per read using manifest, community flag, or read ID
-    def _get_label(row):
-        parsed = parse_read_id(row["read_id"])
-        return resolve_true_label(parsed.get("contig"), manifest, community)
-
-    df["true_label"]  = df.apply(_get_label, axis=1)
+    # ── Vectorised ground-truth resolution ────────────────────────────────
+    df["true_label"]  = _resolve_labels_vectorised(df["contig"], manifest, community)
     df["is_override"] = df["action_override"]
 
-    # is_correct: True if decision matches ground truth
-    #   true_label=1 + stop_receiving → correct (TP)
-    #   true_label=1 + unblock        → wrong   (FN)
-    #   true_label=0 + unblock        → correct (TN)
-    #   true_label=0 + stop_receiving → wrong   (FP)
-    #   true_label=-1                 → unknown (excluded)
-    def _is_correct(row):
-        lbl = row["true_label"]
-        dec = row["decision"]
-        if lbl == 1:
-            return dec in ACCEPT_DECISIONS
-        if lbl == 0:
-            return dec in REJECT_DECISIONS
-        return None   # unknown
+    # ── Vectorised is_correct ─────────────────────────────────────────────
+    # Replaces row-wise apply() with boolean masks
+    is_accept = df["decision"].isin(ACCEPT_DECISIONS)
+    is_reject = df["decision"].isin(REJECT_DECISIONS)
+    lbl = df["true_label"]
+    df["is_correct"] = np.where(
+        lbl == 1, is_accept,
+        np.where(lbl == 0, is_reject, False)
+    ).astype(object)
+    # Unknown labels should be None, not False
+    df.loc[lbl == -1, "is_correct"] = None
 
-    df["is_correct"] = df.apply(_is_correct, axis=1)
-
-    # Use "mixed" as the community label in filenames when community is None
+    # ── Save per-read table (optional — skipped in batch mode) ────────────
     comm_label = community if community is not None else "mixed"
 
     out_perread = outdir / f"{tool}_{dataset}_community{comm_label}_per_read.tsv"
-    df.to_csv(out_perread, sep="\t", index=False)
-    logger.info("Saved per-read table → %s", out_perread)
+    if save_per_read:
+        df.to_csv(out_perread, sep="\t", index=False)
+        logger.info("Saved per-read table → %s", out_perread)
+    else:
+        logger.debug("Skipping per-read table (--no-save-per-read)")
 
     # ── Metrics (override-excluded) ────────────────────────────────────────
     # Exclude reads with unknown true_label from accuracy metrics
@@ -474,20 +564,22 @@ def analyse_mixed_run(
     tool: str,
     dataset: str,
 ) -> PairedRunMetrics:
-    """
-    Build a PairedRunMetrics from a single mixed-community run where
-    true_label is set per-read from the manifest.
-    """
-    known = per_read_df[per_read_df["true_label"] != -1].copy()
-    decided = known[
-        (~known["is_override"]) &
-        (known["decision"].isin(ACCEPT_DECISIONS | REJECT_DECISIONS))
-    ]
+    # Compute all masks once upfront — avoids redundant isin() calls
+    known_mask   = per_read_df["true_label"] != -1
+    known        = per_read_df[known_mask]
+    is_accept    = known["decision"].isin(ACCEPT_DECISIONS)
+    is_reject    = known["decision"].isin(REJECT_DECISIONS)
+    not_override = ~known["is_override"]
+    decided_mask = not_override & (is_accept | is_reject)
+    decided      = known[decided_mask]
+    d_accept     = decided["decision"].isin(ACCEPT_DECISIONS)
+    d_reject     = decided["decision"].isin(REJECT_DECISIONS)
+    lbl          = decided["true_label"]
 
-    tp = int(((decided["decision"].isin(ACCEPT_DECISIONS)) & (decided["true_label"] == 1)).sum())
-    fn = int(((decided["decision"].isin(REJECT_DECISIONS)) & (decided["true_label"] == 1)).sum())
-    tn = int(((decided["decision"].isin(REJECT_DECISIONS)) & (decided["true_label"] == 0)).sum())
-    fp = int(((decided["decision"].isin(ACCEPT_DECISIONS)) & (decided["true_label"] == 0)).sum())
+    tp = int((d_accept & (lbl == 1)).sum())
+    fn = int((d_reject & (lbl == 1)).sum())
+    tn = int((d_reject & (lbl == 0)).sum())
+    fp = int((d_accept & (lbl == 0)).sum())
 
     precision   = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall      = tp / (tp + fn) if (tp + fn) > 0 else 0.0
@@ -495,14 +587,9 @@ def analyse_mixed_run(
                    if (precision + recall) > 0 else 0.0)
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
 
-    def _latency(df_community: pd.DataFrame):
-        """Compute inter-decision intervals for one community's decided reads."""
-        ts = (df_community[~df_community["is_override"]]
-              .loc[df_community["decision"].isin(ACCEPT_DECISIONS | REJECT_DECISIONS),
-                   "timestamp"]
-              .dropna()
-              .sort_values()
-              .values)
+    def _latency(decided_comm: pd.DataFrame):
+        """Compute inter-decision intervals from an already-filtered decided slice."""
+        ts = decided_comm["timestamp"].dropna().sort_values().values
         if len(ts) < 2:
             return float("nan"), float("nan"), float("nan")
         iv = np.diff(ts)
@@ -511,19 +598,16 @@ def analyse_mixed_run(
             return float("nan"), float("nan"), float("nan")
         return float(np.mean(iv)), float(np.median(iv)), float(np.percentile(iv, 95))
 
-    def _seqlen_median(df_community: pd.DataFrame):
-        sl = (df_community[~df_community["is_override"]]
-              .loc[df_community["decision"].isin(ACCEPT_DECISIONS | REJECT_DECISIONS),
-                   "seq_len"]
-              .dropna()
-              .values)
+    def _seqlen_median(decided_comm: pd.DataFrame):
+        sl = decided_comm["seq_len"].dropna().values
         return float(np.median(sl)) if len(sl) > 0 else float("nan")
 
-    c0 = known[known["true_label"] == 0]
-    c1 = known[known["true_label"] == 1]
+    # Split decided into communities — reuse the already-filtered decided DataFrame
+    d_c0 = decided[lbl == 0]
+    d_c1 = decided[lbl == 1]
 
-    c0_lat_mean, c0_lat_median, c0_lat_p95 = _latency(c0)
-    c1_lat_mean, c1_lat_median, c1_lat_p95 = _latency(c1)
+    c0_lat_mean, c0_lat_median, c0_lat_p95 = _latency(d_c0)
+    c1_lat_mean, c1_lat_median, c1_lat_p95 = _latency(d_c1)
 
     return PairedRunMetrics(
         tool=tool, dataset=dataset,
@@ -538,12 +622,12 @@ def analyse_mixed_run(
         c1_latency_mean_s=c1_lat_mean,
         c1_latency_median_s=c1_lat_median,
         c1_latency_p95_s=c1_lat_p95,
-        c0_seqlen_median=_seqlen_median(c0),
-        c1_seqlen_median=_seqlen_median(c1),
+        c0_seqlen_median=_seqlen_median(d_c0),
+        c1_seqlen_median=_seqlen_median(d_c1),
         c1_n_total=int((known["true_label"] == 1).sum()),
-        c1_n_decided=int((decided["true_label"] == 1).sum()),
+        c1_n_decided=int(len(d_c1)),
         c0_n_total=int((known["true_label"] == 0).sum()),
-        c0_n_decided=int((decided["true_label"] == 0).sum()),
+        c0_n_decided=int(len(d_c0)),
     )
 
 
@@ -1102,6 +1186,7 @@ def cmd_batch(args: argparse.Namespace) -> None:
                 community=run.get("community"),
                 manifest=manifest,
                 unblocked_txt=run["unblocked"],
+                save_per_read=args.save_per_read,
             )
         except Exception as exc:
             logger.error("Failed: %s / community%s: %s", tool,
@@ -1231,6 +1316,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--mem-log",   default=None,
                    help="readfish_mem_<timestamp>.tsv from simulate_run.sh "
                         "(populates peak_rss_mb in paired metrics)")
+    s.add_argument("--no-save-per-read", dest="save_per_read",
+                   action="store_false", default=True,
+                   help="Skip writing the large per-read TSV (speeds up analysis "
+                        "on very large runs)")
     s.add_argument("--outdir",    default="./output")
     s.set_defaults(func=cmd_single)
 
@@ -1248,6 +1337,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "<mem-log-dir>/<tool>/readfish_mem_*.tsv. "
                         "If omitted, auto-discovery looks under --results-dir/<tool>/. "
                         "Populates peak_rss_mb in paired metrics.")
+    b.add_argument("--no-save-per-read", dest="save_per_read",
+                   action="store_false", default=True,
+                   help="Skip writing per-read TSVs (recommended for large runs)")
     b.add_argument("--outdir",      default="./figures",
                    help="Where to write aggregate figures and CSVs")
     b.set_defaults(func=cmd_batch)
