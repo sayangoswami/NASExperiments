@@ -8,12 +8,13 @@ export ALL_TASKS="1-7"
 export DATADIR=/data/SimulatedDatasets/Gut/
 export RAWHASH_DIR=$CODEDIR/rawhash2
 export OUTDIR=$TMPDIR/gutd1
+export REF=$DATADIR/Refs_d0.1_Comm_1.fa
 
 f1() {
     mkdir -p $OUTDIR/cl
     echo "Building Collinearity index for Gut (d=0.1).."
     measure Collinearity \
-    --ref $DATADIR/Refs_d0.1_Comm_1.fa \
+    --ref $REF \
     --idx $OUTDIR/cl/gutd0.1 \
     --bw 1024
 }
@@ -21,21 +22,21 @@ f1() {
 f2() {
     mkdir -p $OUTDIR/sp
     echo "Building Spumoni index for Gut (d=0.1).."
-    measure spumoni build -r $DATADIR/Refs_d0.1_Comm_1.fa -M -P -m -o $OUTDIR/sp/gutd0.1
+    measure spumoni build -r $REF -M -P -m -o $OUTDIR/sp/gutd0.1
 }
 
 f3() {
     mkdir -p $OUTDIR/mg
     echo "Building Metagraph index for Gut (d=0.1).."
     #  metagraph build and annotate
-    measure metagraph build -v -p 16 -k 31 -o $OUTDIR/mg/gutd0.1 $DATADIR/Refs_d0.1_Comm_1.fa
-    measure metagraph annotate -v -p 16 -i $OUTDIR/mg/gutd0.1.dbg --anno-header -o $OUTDIR/mg/gutd0.1 $DATADIR/Refs_d0.1_Comm_1.fa 
+    measure metagraph build -v -p 16 -k 21 -o $OUTDIR/mg/gutd0.1 $REF
+    measure metagraph annotate -v -p 16 -i $OUTDIR/mg/gutd0.1.dbg --anno-header -o $OUTDIR/mg/gutd0.1 $REF 
 }
 
 f4() {
     mkdir -p $OUTDIR/mm
     echo "Building Minimap2 index for Gut (d=0.1).."
-    measure minimap2 -x map-ont -d $OUTDIR/mm/gutd0.1.mmi $DATADIR/Refs_d0.1_Comm_1.fa
+    measure minimap2 -x map-ont -d $OUTDIR/mm/gutd0.1.mmi $REF
 }
 
 f5() {
@@ -49,12 +50,12 @@ f5() {
 
     cat > "$config_file" <<EOF
 usage               = "build"
-output_directory    = "$OUTDIR/rb/gutd0.1"
+output_directory    = "$OUTDIR/rb"
 log_directory       = "$LOGDIR"
 
 [IBF]
 threads       = 8
-target_files  = ["$DATADIR/Refs_d0.1_Comm_1.fa"]
+target_files  = ["$REF"]
 EOF
 
     measure ReadBouncer --config "$config_file"
@@ -65,13 +66,13 @@ f6() {
     echo "Building RawHash index for Gut (d=0.1).."
     measure rawhash2 --r10 -t 32 -d $OUTDIR/rh/gutd0.1.ind -p \
         $RAWHASH_DIR/extern/local_kmer_models/uncalled_r1041_model_only_means.txt \
-        $DATADIR/Refs_d0.1_Comm_1.fa
+        $REF
 }
 
 f7() {
     mkdir -p $OUTDIR/sg
     echo "Building Sigmoni index for Gut (d=0.1).."
-    measure sigmoni-index -p $DATADIR/Refs_d0.1_Comm_1.fa \
+    measure sigmoni-index -p $REF \
         -o $OUTDIR/sg --spumoni-path $SPUMONI_BUILD_DIR \
         --poremodel $CODEDIR/sigmoni/poremodel/model_r1041_400bps_dm_it2.tsv
 }

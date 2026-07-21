@@ -6,15 +6,15 @@ export ALL_TASKS="1-7"
 
 # other variables
 export SIGNAL_LENGTH=3200
-export DATADIR=/data/SimulatedDatasets/Zymo
-export SIGS=$DATADIR/PromethION_R10.4.1-seq2squiggle/signals/
-export RES=$RESDIR/benchmarks/zymo_$SIGNAL_LENGTH
-export MANIFEST=$DATADIR/manifest.tsv
+export DATADIR=/data/SimulatedDatasets/Gut
+export SIGS="$DATADIR/signal/PromethION_R10.4.1-seq2squiggle/d0.2"
+export RES=$RESDIR/benchmarks/gut_d2_$SIGNAL_LENGTH
+export MANIFEST=$DATADIR/d0.2_manifest.tsv
 export BASECALL_ADDRESS="ipc:///var/lib/minknow/data/.dorado/dorado-basecall-server.sock"
 export BASECALL_CONFIG="dna_r10.4.1_e8.2_400bps_fast@v5.2.0||"
 export BATCH_SIZE=4096
 export DEBUG_LOG=$LOGDIR/debug.log
-export INDIR=$TMPDIR/zymo
+export INDIR=$TMPDIR/gutd2
 
 f0() {
     # Does the socket exist and is it accessible from the calling script's environment?
@@ -40,10 +40,10 @@ c.disconnect()
 }
 
 f1() {
-    echo "Benchmarking mappy_rs for Zymo.."
+    echo "Benchmarking mappy_rs for Gut (d=0.2).."
     
     pl_args="\
-    fn_idx_in=$INDIR/mm/zymo.mmi \
+    fn_idx_in=$INDIR/mm/gutd0.2.mmi \
     n_threads=16"
     
     benchmark_aligner.py \
@@ -59,12 +59,12 @@ f1() {
 }
 
 f2() {
-    echo "Benchmarking metagraph query for Zymo.."
+    echo "Benchmarking metagraph query for Gut (d=0.2).."
     
     pl_args="\
     method=query \
-    input=$INDIR/mg/zymo.dbg \
-    annotator=$INDIR/mg/zymo.column.annodbg \
+    input=$INDIR/mg/gutd0.2.dbg \
+    annotator=$INDIR/mg/gutd0.2.column.annodbg \
     threads=16 \
     num_top_labels=1 \
     discovery_fraction=0.1"
@@ -82,12 +82,12 @@ f2() {
 }
 
 f3() {
-    echo "Benchmarking metagraph align for Zymo.."
-    
+    echo "Benchmarking metagraph align for Gut (d=0.2).."
+
     pl_args="\
     method=align \
-    input=$INDIR/mg/zymo.dbg \
-    annotator=$INDIR/mg/zymo.column.annodbg \
+    input=$INDIR/mg/gutd0.2.dbg \
+    annotator=$INDIR/mg/gutd0.2.column.annodbg \
     threads=16 \
     seed_length=21 \
     max_alternative_alignments=1 \
@@ -109,10 +109,10 @@ f3() {
 }
 
 f4() {
-    echo "Benchmarking spumoni for Zymo.."
+    echo "Benchmarking spumoni for Gut (d=0.2).."
     
     pl_args="\
-    ref=$INDIR/sp/zymo \
+    ref=$INDIR/sp/gutd0.2 \
     threads=16 \
     PML=true \
     minimizer_alphabet=true"
@@ -130,10 +130,10 @@ f4() {
 }
 
 f5() {
-    echo "Benchmarking readbouncer for Zymo.."
+    echo "Benchmarking readbouncer for Gut (d=0.2).."
     
     pl_args="\
-    target_files=$INDIR/rb/Refs1.ibf \
+    target_files=$INDIR/rb/Refs_d0.2_Comm_1.ibf \
     threads=16"
     
     benchmark_aligner.py \
@@ -149,10 +149,10 @@ f5() {
 }
 
 f6() {
-    echo "Benchmarking collinearity for Zymo.."
+    echo "Benchmarking collinearity for Gut (d=0.2).."
     
     pl_args="\
-    input=$INDIR/cl/zymo.cidx \
+    input=$INDIR/cl/gutd0.2.cidx \
     bw=1024 \
     n_threads=16"
     
@@ -169,12 +169,12 @@ f6() {
 }
 
 f7() {
-    echo "Benchmarking rawhash for Zymo.."
+    echo "Benchmarking rawhash for Gut (d=0.2).."
     
     pl_args="\
-    idx=$INDIR/rh/zymo.ind \
+    idx=$INDIR/rh/gutd0.2.ind \
     threads=16 \
-    x=viral"
+    x=faster"
     
     benchmark_aligner.py \
     --input "$SIGS/*.blow5" \
@@ -187,7 +187,7 @@ f7() {
 }
 
 f8() {
-    echo "Benchmarking sigmoni for Zymo.."
+    echo "Benchmarking sigmoni for Gut (d=0.2).."
     
     pl_args="\
     ref_prefix=$INDIR/sg/refs/ref \
