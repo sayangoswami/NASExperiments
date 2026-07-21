@@ -55,7 +55,8 @@ f1() {
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f2() {
@@ -78,7 +79,8 @@ f2() {
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f3() {
@@ -105,7 +107,8 @@ f3() {
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f4() {
@@ -126,7 +129,8 @@ f4() {
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f5() {
@@ -145,7 +149,8 @@ f5() {
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f6() {
@@ -165,7 +170,8 @@ f6() {
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f7() {
@@ -183,7 +189,8 @@ f7() {
     --output $RES/rawhash/ \
     --manifest $MANIFEST \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }
 
 f8() {
@@ -201,5 +208,6 @@ f8() {
     --output $RES/sigmoni/ \
     --manifest $MANIFEST \
     --truncate-signals $SIGNAL_LENGTH \
-    --batch-size $BATCH_SIZE
+    --batch-size $BATCH_SIZE \
+    --dataset gut_d1
 }

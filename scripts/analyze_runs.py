@@ -362,7 +362,7 @@ def analyse_community_run(
 
     df["is_correct"] = df.apply(_is_correct, axis=1)
 
-    # Save enriched per-read table
+    # Use "mixed" as the community label in filenames when community is None
     comm_label = community if community is not None else "mixed"
 
     out_perread = outdir / f"{tool}_{dataset}_community{comm_label}_per_read.tsv"
@@ -463,6 +463,10 @@ class PairedRunMetrics:
 
     # Memory (populated separately if mem_log available)
     peak_rss_mb: float = float("nan")
+
+    # Throughput from batch_stats TSV (reads/s)
+    throughput_mean_reads_per_s:   float = float("nan")
+    throughput_median_reads_per_s: float = float("nan")
 
 
 def analyse_mixed_run(
@@ -880,19 +884,26 @@ def plot_summary_table_image(df: pd.DataFrame, outdir: Path) -> None:
 
 def load_mem_log(mem_log_path: str) -> float:
     """
-    Load a readfish_mem_<timestamp>.tsv written by simulate_run.sh and return
-    peak RSS in MB.
+    Load a memory log and return peak RSS in MB. Accepts two formats:
 
-    Expected format (tab-separated, with header):
-        timestamp_s    rss_mb
-        1234567890.1   512.34
+    1. readfish_mem_<timestamp>.tsv  (written by simulate_run.sh)
+       Columns: timestamp_s, rss_mb
+       Peak = max(rss_mb)
+
+    2. <tool>_<dataset>_batch_stats.tsv  (written by benchmark_aligner.py)
+       Columns include: mem_peak_kb_so_far
+       Peak = max(mem_peak_kb_so_far) / 1024
     """
     try:
         df = pd.read_csv(mem_log_path, sep="\t")
-        if "rss_mb" not in df.columns:
-            logger.warning("mem log %s has no \'rss_mb\' column -- skipping", mem_log_path)
+        if "rss_mb" in df.columns:
+            peak = float(df["rss_mb"].max())
+        elif "mem_peak_kb_so_far" in df.columns:
+            peak = float(df["mem_peak_kb_so_far"].max()) / 1024.0
+        else:
+            logger.warning("mem log %s has neither \'rss_mb\' nor "
+                           "\'mem_peak_kb_so_far\' column -- skipping", mem_log_path)
             return float("nan")
-        peak = float(df["rss_mb"].max())
         logger.info("Peak RSS %.1f MB from %s", peak, mem_log_path)
         return peak
     except Exception as e:
@@ -900,11 +911,25 @@ def load_mem_log(mem_log_path: str) -> float:
         return float("nan")
 
 
-def _find_mem_log(tool_dir: Path) -> Optional[str]:
+def _find_mem_log(tool_dir: Path, dataset: str = "") -> Optional[str]:
     """
-    Auto-discover a readfish_mem_*.tsv in tool_dir or its logs/ sibling.
-    Returns the path of the most recently modified match, or None.
+    Auto-discover a memory log for a tool run. Checks in priority order:
+
+    1. <tool_dir>/<tool>_<dataset>_batch_stats.tsv  (benchmark_aligner.py output)
+    2. <tool_dir>/readfish_mem_*.tsv                (simulate_run.sh output)
+    3. <tool_dir>/logs/readfish_mem_*.tsv           (simulate_run.sh, logs subdir)
+
+    Returns the path of the first match found, or None.
     """
+    # Priority 1: benchmark_aligner.py batch stats
+    # Glob for *_<dataset>_batch_stats.tsv so plugin name (e.g. pycollinearity)
+    # mismatches with directory name (e.g. collinearity) are handled correctly.
+    if dataset:
+        matches = sorted(tool_dir.glob(f"*_{dataset}_batch_stats.tsv"))
+        if matches:
+            return str(matches[0])
+
+    # Priority 2 & 3: simulate_run.sh memory log (glob, most recent)
     candidates = sorted(
         list(tool_dir.glob("readfish_mem_*.tsv")) +
         list(tool_dir.glob("logs/readfish_mem_*.tsv")),
@@ -912,6 +937,39 @@ def _find_mem_log(tool_dir: Path) -> Optional[str]:
         reverse=True,
     )
     return str(candidates[0]) if candidates else None
+
+
+def load_throughput(batch_stats_path: str) -> Tuple[float, float]:
+    """
+    Load mean and median throughput (reads/s) from a benchmark_aligner.py
+    batch_stats TSV. Returns (mean, median) or (nan, nan) on failure.
+
+    Only the *_batch_stats.tsv format has throughput_reads_per_s; the
+    simulate_run.sh memory log does not, so we return nan for that case.
+    """
+    try:
+        df = pd.read_csv(batch_stats_path, sep="\t")
+        if "throughput_reads_per_s" not in df.columns:
+            return float("nan"), float("nan")
+        col = df["throughput_reads_per_s"].dropna()
+        if col.empty:
+            return float("nan"), float("nan")
+        return float(col.mean()), float(col.median())
+    except Exception as e:
+        logger.warning("Could not load throughput from %s: %s", batch_stats_path, e)
+        return float("nan"), float("nan")
+
+
+def _find_batch_stats(tool_dir: Path, dataset: str) -> Optional[str]:
+    """
+    Find a benchmark_aligner.py batch_stats TSV in tool_dir.
+    Globs for *_<dataset>_batch_stats.tsv so it works regardless of whether
+    the plugin name (e.g. pycollinearity) differs from the directory name
+    (e.g. collinearity).
+    Returns the path of the first match, or None.
+    """
+    matches = sorted(tool_dir.glob(f"*_{dataset}_batch_stats.tsv"))
+    return str(matches[0]) if matches else None
 
 
 # ---------------------------------------------------------------------------
@@ -1003,6 +1061,10 @@ def cmd_single(args: argparse.Namespace) -> None:
         pm = analyse_mixed_run(per_read_df, args.tool, args.dataset)
         if args.mem_log:
             pm.peak_rss_mb = load_mem_log(args.mem_log)
+            # Also extract throughput if the mem_log is a batch_stats TSV
+            t_mean, t_median = load_throughput(args.mem_log)
+            pm.throughput_mean_reads_per_s   = t_mean
+            pm.throughput_median_reads_per_s = t_median
         out = Path(args.outdir) / f"{args.tool}_{args.dataset}_paired_metrics.json"
         with open(out, "w") as fh:
             json.dump(asdict(pm), fh, indent=2)
@@ -1075,12 +1137,18 @@ def cmd_batch(args: argparse.Namespace) -> None:
             mem_log = None
             if args.mem_log_dir:
                 tool_dir = Path(args.mem_log_dir) / tool
-                mem_log = _find_mem_log(tool_dir)
+                mem_log = _find_mem_log(tool_dir, dataset=args.dataset)
             else:
                 tool_dir = Path(args.results_dir) / tool
-                mem_log = _find_mem_log(tool_dir)
+                mem_log = _find_mem_log(tool_dir, dataset=args.dataset)
             if mem_log:
                 pm.peak_rss_mb = load_mem_log(mem_log)
+            # Throughput is independent of memory log — discover batch_stats separately
+            batch_stats = _find_batch_stats(tool_dir, args.dataset)
+            if batch_stats:
+                t_mean, t_median = load_throughput(batch_stats)
+                pm.throughput_mean_reads_per_s   = t_mean
+                pm.throughput_median_reads_per_s = t_median
             paired_metrics.append(pm)
             out = outdir / f"{tool}_{args.dataset}_paired_metrics.json"
             with open(out, "w") as fh:
@@ -1096,12 +1164,18 @@ def cmd_batch(args: argparse.Namespace) -> None:
             mem_log = None
             if args.mem_log_dir:
                 tool_dir = Path(args.mem_log_dir) / tool
-                mem_log = _find_mem_log(tool_dir)
+                mem_log = _find_mem_log(tool_dir, dataset=args.dataset)
             else:
                 tool_dir = Path(args.results_dir) / tool
-                mem_log = _find_mem_log(tool_dir)
+                mem_log = _find_mem_log(tool_dir, dataset=args.dataset)
             if mem_log:
                 pm.peak_rss_mb = load_mem_log(mem_log)
+            # Throughput is independent of memory log — discover batch_stats separately
+            batch_stats = _find_batch_stats(tool_dir, args.dataset)
+            if batch_stats:
+                t_mean, t_median = load_throughput(batch_stats)
+                pm.throughput_mean_reads_per_s   = t_mean
+                pm.throughput_median_reads_per_s = t_median
             paired_metrics.append(pm)
             out = outdir / f"{tool}_{args.dataset}_paired_metrics.json"
             with open(out, "w") as fh:
