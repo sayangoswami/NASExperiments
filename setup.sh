@@ -4,50 +4,43 @@ export EXPDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd
 cd $EXPDIR
 
 # Create directory structure
-mkdir code logs out results tmp
+mkdir -p code logs out results tmp
 
 # setup minimap2
 cd $EXPDIR/code
-git clone https://github.com/lh3/minimap2.git
+[ -d minimap2 ] || git clone https://github.com/lh3/minimap2.git
 cd minimap2
 make -j8
 
 # setup collinearity
 cd $EXPDIR/code
-git clone --recursive https://github.com/ratschlab/collinearity.git
+[ -d collinearity ] || git clone --recursive https://github.com/ratschlab/collinearity.git
 cd collinearity
 
 # for python bindings
 pip install .
 
 # to build from source
-mkdir build && cd build  
-cmake ..  
+mkdir -p build && cd build
+cmake ..
 make -j 8
 
-# setup metagraph
-conda install -c bioconda -c conda-forge metagraph
-cd $EXPDIR/code
-git clone https://github.com/ratschlab/metagraphRF.git
-cd metagraphRF
-pip install .
-
-# build metagraph from align_refactor branch
+# build metagraph from sg/readfish-bindings branch
 # From https://metagraph.ethz.ch/static/docs/installation.html#install-from-source
 cd $EXPDIR/code
-git clone -b align_refactor --recursive https://github.com/ratschlab/metagraph.git
+[ -d metagraph ] || git clone -b sg/readfish-bindings --recursive https://github.com/ratschlab/metagraph.git
 cd metagraph
 git submodule update --init --recursive
-mkdir metagraph/build
+mkdir -p metagraph/build
 cd metagraph/build
 cmake ..
 make -j 16
 
 # setup spumoni
 cd $EXPDIR/code
-git clone --recursive https://github.com/ratschlab/spumoni.git
+[ -d spumoni ] || git clone --recursive https://github.com/ratschlab/spumoni.git
 cd spumoni
-mkdir build && cd build
+mkdir -p build && cd build
 cmake ..
 make -j 16
 make install
@@ -58,7 +51,7 @@ pip install .
 
 # setup rawhash
 cd $EXPDIR/code
-git clone -b cmake_merge --recursive https://github.com/ratschlab/RawHash.git rawhash2
+[ -d rawhash2 ] || git clone -b cmake --recursive https://github.com/ratschlab/RawHash.git rawhash2
 cd rawhash2
 git submodule update --init --recursive
 mkdir -p build && cd build
@@ -69,12 +62,42 @@ make -j 8
 cd ..
 pip install .
 
+# setup ReadBouncer
+cd $EXPDIR/code
+[ -d ReadBouncer ] || git clone --recursive https://github.com/ratschlab/ReadBouncer.git
+cd ReadBouncer
+git submodule update --init --recursive
+mkdir -p build && cd build
+cmake ../src
+make -j 8
+
+# setup sigmoni
+# requires SPUMONI (built above) and Uncalled4
+cd $EXPDIR/code
+[ -d sigmoni ] || git clone https://github.com/ratschlab/sigmoni.git
+cd sigmoni
+pip install uncalled4
+pip install .
+
+# setup seq2squiggle
+cd $EXPDIR/code
+[ -d seq2squiggle ] || git clone https://github.com/ZKI-PH-ImageAnalysis/seq2squiggle.git
+cd seq2squiggle
+pip install .
+
 # Setup Minknow API Simulator
 cd $EXPDIR/code
-git clone https://github.com/ratschlab/MinknoApiSimulator.git
+[ -d MinknoApiSimulator ] || git clone https://github.com/ratschlab/MinknoApiSimulator.git
 cd MinknoApiSimulator/certs
 ./generate.sh
 cd ..
 pip install .
+
+# NOTE: ont-dorado-server is NOT set up by this script. It is ONT's vendored
+# Dorado/Guppy basecall server binary distribution, gated behind an ONT
+# community login (https://community.nanoporetech.com/). Download the Linux
+# server package matching your basecaller version and extract it to
+# $EXPDIR/code/ont-dorado-server/ -- see README.md step 5 for checking
+# client/server version compatibility.
 
 cd $EXPDIR
