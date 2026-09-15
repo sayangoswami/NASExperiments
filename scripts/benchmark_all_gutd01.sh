@@ -2,19 +2,19 @@
 
 # --- List of all tasks to run by default ---
 # This variable is used by the main script when no numbers are specified.
-export ALL_TASKS="1-7"
+export ALL_TASKS="1-8"
 
 # other variables
-export SIGNAL_LENGTH=3200
 export DATADIR=/data/SimulatedDatasets/Gut
 export SIGS="$DATADIR/signal/PromethION_R10.4.1-seq2squiggle/d0.1"
-export RES=$RESDIR/benchmarks/gut_d1_$SIGNAL_LENGTH
+export RES=$OUTDIR/benchmarks/gut_d1_$SIGNAL_LENGTH
 export MANIFEST=$DATADIR/d0.1_manifest.tsv
 export BASECALL_ADDRESS="ipc:///var/lib/minknow/data/.dorado/dorado-basecall-server.sock"
 export BASECALL_CONFIG="dna_r10.4.1_e8.2_400bps_fast@v5.2.0||"
 export BATCH_SIZE=4096
 export DEBUG_LOG=$LOGDIR/debug.log
 export INDIR=$TMPDIR/gutd1
+export NUM_THREADS=16
 
 f0() {
     # Does the socket exist and is it accessible from the calling script's environment?
@@ -40,11 +40,12 @@ c.disconnect()
 }
 
 f1() {
-    echo "Benchmarking mappy_rs for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Benchmarking mappy_rs for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
     
     pl_args="\
     fn_idx_in=$INDIR/mm/gutd0.1.mmi \
-    n_threads=16"
+    n_threads=$NUM_THREADS"
     
     benchmark_aligner.py \
     --input "$SIGS/*.blow5" \
@@ -56,17 +57,19 @@ f1() {
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 1000 \
     --dataset gut_d1
 }
 
 f2() {
-    echo "Benchmarking metagraph query for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Benchmarking metagraph query for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
     
     pl_args="\
     method=query \
     input=$INDIR/mg/gutd0.1.dbg \
     annotator=$INDIR/mg/gutd0.1.column.annodbg \
-    threads=16 \
+    threads=$NUM_THREADS \
     num_top_labels=1 \
     discovery_fraction=0.1"
     
@@ -74,29 +77,32 @@ f2() {
     --input "$SIGS/*.blow5" \
     --plugin pymetagraph \
     --plugin-args "$pl_args" \
-    --output $RES/metagraph_query/ \
+    --output $RES/metagraph/ \
     --manifest $MANIFEST \
     --basecall-address $BASECALL_ADDRESS \
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 1000 \
     --dataset gut_d1
 }
 
 f3() {
-    echo "Benchmarking metagraph align for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Not Benchmarking metagraph align for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
+    return 0
 
     pl_args="\
     method=align \
     input=$INDIR/mg/gutd0.1.dbg \
-    annotator=$INDIR/mg/gutd0.1.column.annodbg \
-    threads=16 \
-    seed_length=21 \
+    threads=$NUM_THREADS \
+    seed_length=19 \
     max_alternative_alignments=1 \
     max_num_nodes_per_seq_char=10 \
-    min_exact_match=0.4 \
-    connect_anchors=true \
-    extend_chains=true"
+    min_exact_match=0.1 \
+    xdrop=50 \
+    connect_anchors=false \
+    extend_chains=false"
     
     benchmark_aligner.py \
     --input "$SIGS/*.blow5" \
@@ -108,15 +114,17 @@ f3() {
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 100 \
     --dataset gut_d1
 }
 
 f4() {
-    echo "Benchmarking spumoni for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Benchmarking spumoni for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
     
     pl_args="\
     ref=$INDIR/sp/gutd0.1 \
-    threads=16 \
+    threads=$NUM_THREADS \
     PML=true \
     minimizer_alphabet=true"
     
@@ -130,15 +138,18 @@ f4() {
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 1000 \
     --dataset gut_d1
 }
 
 f5() {
-    echo "Benchmarking readbouncer for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Benchmarking readbouncer for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
     
     pl_args="\
     target_files=$INDIR/rb/Refs_d0.1_Comm_1.ibf \
-    threads=16"
+    kmer_size=17 \
+    threads=$NUM_THREADS"
     
     benchmark_aligner.py \
     --input "$SIGS/*.blow5" \
@@ -150,16 +161,17 @@ f5() {
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 1000 \
     --dataset gut_d1
 }
 
 f6() {
-    echo "Benchmarking collinearity for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Benchmarking collinearity for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
     
     pl_args="\
     input=$INDIR/cl/gutd0.1.cidx \
-    bw=1024 \
-    n_threads=16"
+    n_threads=$NUM_THREADS"
     
     benchmark_aligner.py \
     --input "$SIGS/*.blow5" \
@@ -171,15 +183,17 @@ f6() {
     --basecall-config  $BASECALL_CONFIG \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 1000 \
     --dataset gut_d1
 }
 
 f7() {
-    echo "Benchmarking rawhash for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Benchmarking rawhash for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
     
     pl_args="\
     idx=$INDIR/rh/gutd0.1.ind \
-    threads=16 \
+    threads=$NUM_THREADS \
     x=faster"
     
     benchmark_aligner.py \
@@ -190,16 +204,21 @@ f7() {
     --manifest $MANIFEST \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 10 \
     --dataset gut_d1
 }
 
 f8() {
-    echo "Benchmarking sigmoni for Gut (d=0.1).."
+    { [[ -v SIGNAL_LENGTH ]] && (( SIGNAL_LENGTH >= 1600 && SIGNAL_LENGTH % 1600 == 0 )); } || SIGNAL_LENGTH=3200
+    echo "Not Benchmarking sigmoni for Gut (d=0.1) with signal length $SIGNAL_LENGTH .."
+    return 0
     
     pl_args="\
     ref_prefix=$INDIR/sg/refs/ref \
     spumoni_path=$CODEDIR/spumoni/build/ \
-    threads=16"
+    threads=$NUM_THREADS \
+    multi=true \
+    complexity=true"
     
     benchmark_aligner.py \
     --input "$SIGS/*.blow5" \
@@ -209,5 +228,6 @@ f8() {
     --manifest $MANIFEST \
     --truncate-signals $SIGNAL_LENGTH \
     --batch-size $BATCH_SIZE \
+    --max-batches-per-file 100 \
     --dataset gut_d1
 }
