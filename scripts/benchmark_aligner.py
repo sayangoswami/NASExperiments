@@ -19,7 +19,8 @@ contig → true_label is resolved via an optional manifest TSV.
   • Multiple values    --input a.blow5 --input b.blow5
 
 All inputs must be the same type (all BLOW5 or all FASTA/Q).
-Files are streamed in sorted order; batches span file boundaries seamlessly.
+Files are streamed in sorted order; batches span file boundaries seamlessly
+(unless --max-batches-per-file is set, see below).
 
 On-the-fly basecalling
 ----------------------
@@ -46,6 +47,16 @@ Only one of the two flags may be set.  Truncation is applied:
   • BLOW5 input, raw-signal aligner   →  --truncate-signals  (before map_reads)
   • BLOW5 input, basecalling enabled  →  --truncate-signals  (before Dorado)
   • FASTA/Q input                     →  --truncate-bases    (before map_reads)
+
+Testing / quick runs
+---------------------
+    --max-batches N              stop after N batches total, across all input
+                                  files combined. 0 = no limit (default).
+    --max-batches-per-file N     process at most N batches from EACH input
+                                  file (e.g. to sample both communities in a
+                                  multi-file run). 0 = no limit (default).
+                                  Forces batches to not span file boundaries.
+                                  Mutually exclusive with --max-batches.
 
 Usage
 -----
@@ -84,6 +95,16 @@ python benchmark_aligner.py \\
     --output results/mappy_zymo/ \\
     --manifest /data/zymo_manifest.tsv \\
     --truncate-bases 360
+
+# Quick smoke test across two communities (2 batches from each file)
+python benchmark_aligner.py \\
+    --input reads_d0.2_Comm_0/*.blow5 \\
+    --input reads_d0.2_Comm_1/*.blow5 \\
+    --plugin pyrawhash \\
+    --plugin-args "idx=/path/to/index.ind threads=16 x=bacterial" \\
+    --output results/rawhash_test/ \\
+    --batch-size 4096 \\
+    --max-batches-per-file 2
 """
 
 from __future__ import annotations
@@ -340,7 +361,7 @@ def load_plugin(module_name: str, plugin_args: str, debug_log: Optional[str]):
         logger.info("Calling %s.Aligner(**kwargs) ...", module_name)
         aligner = aligner_cls(**kwargs)
         logger.info("%s.Aligner instantiated in %.2fs", module_name, time.perf_counter() - t0)
-    
+
     load_s = time.perf_counter() - t0
     mem_after_kb = _read_pss_kb()
 
@@ -351,7 +372,7 @@ def load_plugin(module_name: str, plugin_args: str, debug_log: Optional[str]):
         logger.info("%s.Aligner.validate() completed in %.2fs", module_name, time.perf_counter() - t0)
     else:
         logger.info("%s.Aligner has no validate() method, skipping.", module_name)
-    
+
     index_load_stats = {
         "load_s":            round(load_s, 3),
         "mem_before_kb":      mem_before_kb,
@@ -624,13 +645,14 @@ def _iter_fasta(path: str) -> Iterator[Tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 def make_result_iter(
-    paths:             List[Path],
-    input_type:        str,
-    batch_size:        int,
-    truncate_signals:  Optional[int]       = None,
-    truncate_bases:    Optional[int]       = None,
-    basecall_cfg:      Optional[BasecallConfig] = None,
+    paths:                  List[Path],
+    input_type:             str,
+    batch_size:             int,
+    truncate_signals:       Optional[int]       = None,
+    truncate_bases:         Optional[int]       = None,
+    basecall_cfg:           Optional[BasecallConfig] = None,
     basecall_client=None,
+    max_batches_per_file:   int                 = 0,
 ) -> Iterator[List[Result]]:
     """
     Yield batches of Result objects from one or more BLOW5 or FASTA/Q files.
@@ -653,6 +675,15 @@ def make_result_iter(
     the aligner.  The resulting Result objects have seq=<basecalled_sequence>
     and basecall_data=None, making them compatible with sequence-based aligner
     plugins.
+
+    max_batches_per_file
+    ---------------------
+    If > 0, at most this many batches are yielded from EACH input file.
+    Batches are NOT allowed to span file boundaries when this is set: any
+    partially-filled batch at the point a file's cap is reached (or the file
+    is exhausted) is flushed immediately, and the next file starts a fresh
+    batch. This is intended for quick multi-file smoke tests (e.g. sampling
+    N batches from each of several community/dataset files in one run).
     """
     channel = 0
     batch: List[Result] = []
@@ -680,6 +711,7 @@ def make_result_iter(
 
     for path in paths:
         logger.info("Reading %s", path)
+        file_batches_yielded = 0
 
         if input_type == "blow5":
             if do_basecall:
@@ -691,12 +723,18 @@ def make_result_iter(
                 with ThreadPoolExecutor(max_workers=1) as pool:
                     staging: List[Tuple[str, np.ndarray, dict]] = []
                     prefetch_future: Optional[Future] = None
+                    file_cap_hit = False
+                    basecall_s = 0.0
 
                     def _submit_staging(buf):
                         """Copy buf and dispatch basecalling in the thread pool."""
                         return pool.submit(_flush_basecall_buffer, list(buf))
 
                     for read_id, signal_f32, meta in _iter_blow5(str(path)):
+                        if max_batches_per_file and file_batches_yielded >= max_batches_per_file:
+                            file_cap_hit = True
+                            break  # stop reading further reads from this file
+
                         if truncate_signals is not None:
                             signal_f32 = signal_f32[:truncate_signals]
                             if meta.get("signal_int16") is not None:
@@ -715,19 +753,29 @@ def make_result_iter(
                                 if batch:
                                     yield batch, basecall_s
                                     batch = []
+                                    file_batches_yielded += 1
+                                    if max_batches_per_file and file_batches_yielded >= max_batches_per_file:
+                                        staging.clear()
+                                        file_cap_hit = True
+                                        break  # don't submit another prefetch job
 
                             prefetch_future = _submit_staging(staging)
                             staging.clear()
 
-                    # Collect the last in-flight future.
+                    # Collect the last in-flight future (unless we just cleared it above
+                    # because the cap was hit right after submitting it — in that case
+                    # prefetch_future may still hold a job that was already dispatched
+                    # before the cap check on a prior iteration, so we still drain it).
                     if prefetch_future is not None:
                         bc_results, basecall_s = prefetch_future.result()
                         for r in bc_results:
                             batch.append(r)
                             channel += 1
+                        prefetch_future = None
 
-                    # Basecall any leftover reads that didn't fill a full buffer.
-                    if staging:
+                    # Basecall any leftover reads that didn't fill a full buffer
+                    # (only relevant if we weren't stopped mid-fill by the cap).
+                    if staging and not file_cap_hit:
                         bc_results, basecall_s = _flush_basecall_buffer(staging)
                         for r in bc_results:
                             batch.append(r)
@@ -737,10 +785,14 @@ def make_result_iter(
                     if batch:
                         yield batch, basecall_s
                         batch = []
+                        file_batches_yielded += 1
 
             else:
                 # Raw-signal aligner path — no basecalling, no prefetch needed.
                 for read_id, signal_f32, meta in _iter_blow5(str(path)):
+                    if max_batches_per_file and file_batches_yielded >= max_batches_per_file:
+                        break  # skip remainder of this file
+
                     if truncate_signals is not None:
                         signal_f32 = signal_f32[:truncate_signals]
                         if meta.get("signal_int16") is not None:
@@ -757,9 +809,15 @@ def make_result_iter(
                     if len(batch) >= batch_size:
                         yield batch, 0.0
                         batch = []
+                        file_batches_yielded += 1
+                        if max_batches_per_file and file_batches_yielded >= max_batches_per_file:
+                            break
 
         else:  # FASTA/Q
             for read_id, seq in _iter_fasta(str(path)):
+                if max_batches_per_file and file_batches_yielded >= max_batches_per_file:
+                    break  # skip remainder of this file
+
                 if truncate_bases is not None:
                     seq = seq[:truncate_bases]
                 batch.append(Result(
@@ -772,7 +830,19 @@ def make_result_iter(
                 if len(batch) >= batch_size:
                     yield batch, 0.0
                     batch = []
+                    file_batches_yielded += 1
+                    if max_batches_per_file and file_batches_yielded >= max_batches_per_file:
+                        break
 
+        # When per-file capping is active, flush any partial batch at the
+        # file boundary instead of letting it merge into the next file's reads.
+        if max_batches_per_file and batch:
+            yield batch, 0.0
+            batch = []
+
+    # Non-capped mode (or trailing partial batch with no cap set): flush
+    # whatever remains after the last file, allowed to span file boundaries
+    # as before.
     if batch:
         yield batch, 0.0
 
@@ -882,18 +952,20 @@ class DecisionTSVWriter:
 
 def run_benchmark(
     aligner,
-    input_paths:      List[Path],
-    input_type:       str,
-    batch_size:       int,
-    manifest:         Optional[Dict[str, int]],
-    outdir:           Path,
-    tool:             str,
-    dataset:          str,
-    decisions_tsv:    Optional[Path]          = None,  # defaults to outdir/readfish_decisions.tsv
-    truncate_signals: Optional[int]           = None,
-    truncate_bases:   Optional[int]           = None,
-    basecall_cfg:     Optional[BasecallConfig] = None,
-    index_load_stats: Optional[dict] = None,
+    input_paths:          List[Path],
+    input_type:           str,
+    batch_size:            int,
+    manifest:              Optional[Dict[str, int]],
+    outdir:                Path,
+    tool:                  str,
+    dataset:               str,
+    decisions_tsv:         Optional[Path]           = None,  # defaults to outdir/readfish_decisions.tsv
+    truncate_signals:      Optional[int]            = None,
+    truncate_bases:        Optional[int]            = None,
+    basecall_cfg:          Optional[BasecallConfig] = None,
+    index_load_stats:      Optional[dict]           = None,
+    max_batches:           int                      = 0,
+    max_batches_per_file:  int                      = 0,
 ) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -955,6 +1027,13 @@ def run_benchmark(
                 truncate_bases,
             )
 
+    if max_batches_per_file:
+        logger.info(
+            "--max-batches-per-file=%d: batches will not span file boundaries; "
+            "each of the %d input file(s) will contribute at most %d batch(es).",
+            max_batches_per_file, len(input_paths), max_batches_per_file,
+        )
+
     decisions_tsv = decisions_tsv or outdir / "readfish_decisions.tsv"
     dec_writer = DecisionTSVWriter(decisions_tsv)
     logger.info("Writing decisions TSV → %s", decisions_tsv)
@@ -964,6 +1043,7 @@ def run_benchmark(
     effective_input_type = "fasta" if basecall_client is not None else input_type
 
     peak_mem_kb = (index_load_stats or {}).get("mem_after_kb") or 0
+    mem_after_batch_kb = None  # in case the loop never runs (0 batches)
 
     try:
         with open(per_read_path,  "w", newline="") as prf, \
@@ -994,6 +1074,7 @@ def run_benchmark(
                         truncate_bases=truncate_bases,
                         basecall_cfg=basecall_cfg,
                         basecall_client=basecall_client,
+                        max_batches_per_file=max_batches_per_file,
                     )):
 
                 n_reads = len(batch)
@@ -1121,6 +1202,14 @@ def run_benchmark(
                         batch_idx, n_reads, n_mapped, align_s, throughput,
                     )
 
+                if max_batches > 0 and (batch_idx + 1) >= max_batches:
+                    logger.info(
+                        "Reached --max-batches=%d, stopping early "
+                        "(processed %d reads across %d batches).",
+                        max_batches, total_reads, batch_idx + 1,
+                    )
+                    break
+
     finally:
         dec_writer.close()
         if basecall_client is not None:
@@ -1131,19 +1220,21 @@ def run_benchmark(
                 pass
 
     summary = {
-        "tool":             tool,
-        "dataset":          dataset,
-        "input_type":       input_type,
-        "effective_input":  effective_input_type,
-        "truncate_signals": truncate_signals,
-        "truncate_bases":   truncate_bases,
-        "total_reads":      total_reads,
-        "total_mapped":     total_mapped,
-        "map_rate":         round(total_mapped / total_reads, 4) if total_reads else 0.0,
+        "tool":                 tool,
+        "dataset":              dataset,
+        "input_type":           input_type,
+        "effective_input":      effective_input_type,
+        "truncate_signals":     truncate_signals,
+        "truncate_bases":       truncate_bases,
+        "total_reads":          total_reads,
+        "total_mapped":         total_mapped,
+        "map_rate":             round(total_mapped / total_reads, 4) if total_reads else 0.0,
         "index_load_s":         (index_load_stats or {}).get("load_s"),
         "index_load_mem_kb":    (index_load_stats or {}).get("mem_delta_kb"),
         "peak_mem_kb":          peak_mem_kb,
         "final_batch_mem_kb":   mem_after_batch_kb,  # steady-state, after last batch
+        "max_batches":          max_batches,
+        "max_batches_per_file": max_batches_per_file,
     }
     summary_path = outdir / f"{tool}_{dataset}_summary.json"
     with open(summary_path, "w") as fh:
@@ -1231,6 +1322,27 @@ def build_parser() -> argparse.ArgumentParser:
                             "Applied to FASTA/Q input, or to basecalled sequences "
                             "when BLOW5 input is used with --basecall-address.")
 
+    # ── Testing / quick runs ────────────────────────────────────────────────
+    test = p.add_argument_group(
+        "testing / quick runs",
+        "Limit how much data is processed, for fast iteration during development.",
+    )
+    test.add_argument("--max-batches", type=int, default=0,
+                       metavar="N",
+                       help="Stop after processing N batches total, across all "
+                            "input files combined. 0 = process all batches "
+                            "(default: 0). Mutually exclusive with "
+                            "--max-batches-per-file.")
+    test.add_argument("--max-batches-per-file", type=int, default=0,
+                       metavar="N",
+                       help="Process at most N batches from EACH input file "
+                            "(useful for testing multiple communities/datasets "
+                            "in one run, e.g. --input comm0.blow5 --input "
+                            "comm1.blow5 --max-batches-per-file 2). "
+                            "0 = no limit (default: 0). Forces batches to not "
+                            "span file boundaries when set. Mutually exclusive "
+                            "with --max-batches.")
+
     # ── Misc ───────────────────────────────────────────────────────────────
     p.add_argument("--log-level",   default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -1278,6 +1390,18 @@ def main():
             "and --basecall-config for on-the-fly basecalling."
         )
 
+    # misc validations
+    if args.max_batches < 0:
+        parser.error("--max-batches must be >= 0 (0 means no limit).")
+    if args.max_batches_per_file < 0:
+        parser.error("--max-batches-per-file must be >= 0 (0 means no limit).")
+    if args.max_batches > 0 and args.max_batches_per_file > 0:
+        parser.error(
+            "--max-batches and --max-batches-per-file are mutually exclusive. "
+            "Use --max-batches for a global cap, or --max-batches-per-file to "
+            "cap batches from each input file independently."
+        )
+
     tool     = args.tool or args.plugin
     outdir   = Path(args.output)
     manifest = load_manifest(args.manifest) if args.manifest else None
@@ -1301,11 +1425,12 @@ def main():
         outdir=outdir,
         tool=tool,
         dataset=args.dataset,
-
         truncate_signals=args.truncate_signals,
         truncate_bases=args.truncate_bases,
         basecall_cfg=basecall_cfg,
         index_load_stats=index_load_stats,
+        max_batches=args.max_batches,
+        max_batches_per_file=args.max_batches_per_file,
     )
 
 

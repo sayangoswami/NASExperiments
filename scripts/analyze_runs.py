@@ -54,13 +54,13 @@ Mixed community (single TSV per tool):
 Usage
 -----
 # Separate community runs (original mode)
-python analyse_runs.py single \
+python analyze_runs.py single \
     --tsv       results/minimap2/community1/readfish_decisions.tsv \
     --tool      minimap2 --dataset zymo --community 1 \
     --outdir    results/minimap2/community1/
 
 # Mixed-community run with manifest
-python analyse_runs.py single \
+python analyze_runs.py single \
     --tsv       results/minimap2/readfish_decisions.tsv \
     --tool      minimap2 --dataset zymo \
     --manifest  data/zymo_manifest.tsv \
@@ -68,11 +68,11 @@ python analyse_runs.py single \
     --unblocked /tmp/MinknoApiSimulator/out/unblocked_read_ids.txt # this is optional but can be used to cross-check the TSV
 
 # Batch — separate communities
-python analyse_runs.py batch \
+python analyze_runs.py batch \
     --results-dir results/zymo/ --dataset zymo --outdir figures/zymo/
 
 # Batch — mixed community with manifest
-python analyse_runs.py batch \
+python analyze_runs.py batch \
     --results-dir results/zymo/ --dataset zymo \
     --manifest    data/zymo_manifest.tsv \
         --outdir      figures/zymo/

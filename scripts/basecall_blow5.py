@@ -29,7 +29,8 @@ Usage
         --address ipc:///var/lib/minknow/data/.dorado/dorado-basecall-server.sock \\
         [--batch-size 4096] \\
         [--timeout  60] \\
-        [--log-file basecall.log]
+        [--log-file basecall.log] \\
+        [--num-batches 10]
 """
 
 import argparse
@@ -64,6 +65,8 @@ def parse_args() -> argparse.Namespace:
                         "or 127.0.0.1:5555)")
     p.add_argument("--batch-size", type=int, default=4096,
                    help="Number of reads per submission batch (default: 4096)")
+    p.add_argument("--num-batches", type=int, default=0,
+                   help="Number of batches to basecall. Use 0 to basecall all batches. (default: 0)")
     p.add_argument("--timeout",    type=int, default=60,
                    help="Per-read timeout in seconds when collecting results "
                         "(default: 60). Total batch timeout = timeout × batch_size.")
@@ -174,7 +177,7 @@ def flush_batch(
 
                 if sequence:
                     fq_out.write(
-                        f"@{read_id} qs:f:{mean_q:.4f}\n"
+                        f">{read_id} qs:f:{mean_q:.4f}\n"
                         f"{sequence}\n"
                         f"+\n"
                         f"{qstring}\n"
@@ -228,6 +231,10 @@ def basecall(args: argparse.Namespace) -> int:
                         f"  Submitted {n_submitted}, basecalled {n_basecalled}...",
                         end="\r", flush=True,
                     )
+                    if args.num_batches > 0 and n_basecalled >= args.num_batches * args.batch_size:
+                        logging.info("Reached maximum number of batches (%d), stopping",
+                                 args.num_batches)
+                        break
 
             # Final partial batch
             n_basecalled += flush_batch(
