@@ -33,8 +33,42 @@ cd metagraph
 git submodule update --init --recursive
 mkdir -p metagraph/build
 cd metagraph/build
-cmake ..
-make -j 16
+
+# metagraph's CLI/server build (BUILD_PYTHON_BINDINGS=OFF) requires Boost with
+# static libs. A conda env's boost-cpp package only ships shared libs and its
+# CMake config gets found before the system one, so point cmake at the system
+# (apt libboost-all-dev) Boost explicitly, installing it first if it's missing.
+# (The pymetagraph python bindings below use shared Boost and don't need this.)
+BOOST_DIR=$(find /usr/lib/*/cmake -maxdepth 1 -type d -iname 'Boost-*' -print -quit 2>/dev/null)
+BOOST_IOSTREAMS_DIR=$(find /usr/lib/*/cmake -maxdepth 1 -type d -iname 'boost_iostreams-*' -print -quit 2>/dev/null)
+if [ -z "$BOOST_DIR" ] || [ -z "$BOOST_IOSTREAMS_DIR" ]; then
+  echo "metagraph: system Boost (static libs) not found, trying to install libboost-all-dev..."
+  if sudo -n true 2>/dev/null; then
+    sudo apt-get update && sudo apt-get install -y libboost-all-dev
+  elif [ "$(id -u)" = "0" ]; then
+    apt-get update && apt-get install -y libboost-all-dev
+  fi
+  BOOST_DIR=$(find /usr/lib/*/cmake -maxdepth 1 -type d -iname 'Boost-*' -print -quit 2>/dev/null)
+  BOOST_IOSTREAMS_DIR=$(find /usr/lib/*/cmake -maxdepth 1 -type d -iname 'boost_iostreams-*' -print -quit 2>/dev/null)
+fi
+
+if [ -n "$BOOST_DIR" ] && [ -n "$BOOST_IOSTREAMS_DIR" ]; then
+  cmake -DBoost_DIR="$BOOST_DIR" -Dboost_iostreams_DIR="$BOOST_IOSTREAMS_DIR" ..
+  make -j 16
+else
+  echo "WARNING: skipping the metagraph CLI/server build -- could not find or" >&2
+  echo "         install a system Boost with static libs (libboost-all-dev)." >&2
+  echo "         Ask your admin to run: sudo apt-get install -y libboost-all-dev" >&2
+  echo "         then re-run setup.sh to build the metagraph CLI binary." >&2
+  echo "         (pymetagraph python bindings will still be installed below.)" >&2
+fi
+
+# pymetagraph python bindings (readfish-compatible aligner plugin)
+# Separate cmake invocation via scikit-build-core with -DBUILD_PYTHON_BINDINGS=ON,
+# which switches metagraph's CMakeLists.txt to shared Boost libs, so the static-lib
+# workaround above isn't needed here.
+cd $EXPDIR/code/metagraph/metagraph/api/python/pymetagraph
+pip install .
 
 # setup spumoni
 cd $EXPDIR/code
@@ -70,6 +104,10 @@ git submodule update --init --recursive
 mkdir -p build && cd build
 cmake ../src
 make -j 8
+
+# pyreadbouncer python bindings
+cd $EXPDIR/code/ReadBouncer
+pip install .
 
 # setup sigmoni
 # requires SPUMONI (built above) and Uncalled4

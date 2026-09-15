@@ -9,7 +9,7 @@
 	conda env create -f env.yml
 	conda activate selectiveseq
 	```
-3. Install Metagraph prerequisites [from here](https://metagraph.ethz.ch/static/docs/installation.html#prerequisites).
+3. Install Metagraph prerequisites [from here](https://metagraph.ethz.ch/static/docs/installation.html#prerequisites). In particular, `libboost-all-dev` (Ubuntu/Debian) must be installed system-wide (`sudo apt-get install libboost-all-dev`) -- a conda-only Boost is not enough, since metagraph's CLI/server build needs *static* Boost libs, which conda's `boost-cpp` package doesn't ship. `setup.sh` tries to install this automatically if it's missing and passwordless `sudo` is available; otherwise it skips the metagraph CLI build with a warning (the `pymetagraph` python bindings are unaffected and still get installed).
 4. Clone repo and setup.
 	```bash
 	git clone <experiments repo>
