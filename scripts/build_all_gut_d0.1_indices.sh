@@ -4,6 +4,8 @@
 # This variable is used by the main script when no numbers are specified.
 export ALL_TASKS="1-7"
 
+source "$SCRIPTDIR/build_common.sh"
+
 # other variables
 export DATADIR=/data/SimulatedDatasets/Gut/
 export RAWHASH_DIR=$CODEDIR/rawhash2
@@ -13,9 +15,7 @@ export NUM_THREADS=32
 export OMP_NUM_THREADS=$NUM_THREADS
 
 f1() {
-    sleep 2
-    mkdir -p $OUTDIR/cl
-    echo "Building Collinearity index for Gut (d=0.1).."
+    build_start cl "Building Collinearity index for Gut (d=0.1).."
     measure Collinearity \
     --ref $REF \
     --idx $OUTDIR/cl/gutd0.1 \
@@ -23,65 +23,36 @@ f1() {
 }
 
 f2() {
-    sleep 2
-    mkdir -p $OUTDIR/sp
-    echo "Building Spumoni index for Gut (d=0.1).."
+    build_start sp "Building Spumoni index for Gut (d=0.1).."
     measure spumoni build -r $REF -M -P -m -o $OUTDIR/sp/gutd0.1
 }
 
 f3() {
-    sleep 2
-    mkdir -p $OUTDIR/mg
-    echo "Building Metagraph index for Gut (d=0.1).."
+    build_start mg "Building Metagraph index for Gut (d=0.1).."
     #  metagraph build and annotate
     measure metagraph build --mode canonical -v -p $NUM_THREADS -k 19 -o $OUTDIR/mg/gutd0.1 $REF
-    measure metagraph annotate -v -p $NUM_THREADS -i $OUTDIR/mg/gutd0.1.dbg --anno-label "found" -o $OUTDIR/mg/gutd0.1 $REF 
+    measure metagraph annotate -v -p $NUM_THREADS -i $OUTDIR/mg/gutd0.1.dbg --anno-label "found" -o $OUTDIR/mg/gutd0.1 $REF
 }
 
 f4() {
-    sleep 2
-    mkdir -p $OUTDIR/mm
-    echo "Building Minimap2 index for Gut (d=0.1).."
+    build_start mm "Building Minimap2 index for Gut (d=0.1).."
     measure minimap2 -t $NUM_THREADS -x map-ont -d $OUTDIR/mm/gutd0.1.mmi $REF
 }
 
 f5() {
-    sleep 2
-    mkdir -p $OUTDIR/rb
-    echo "Building readBouncer index for Gut (d=0.1).."
-    local config_file
-    config_file="$(mktemp --suffix=.toml)"
-
-    # cleanup fires when this function returns, however it returns
-    trap 'rm -f "$config_file"' RETURN
-
-    cat > "$config_file" <<EOF
-usage               = "build"
-output_directory    = "$OUTDIR/rb"
-log_directory       = "$LOGDIR"
-
-[IBF]
-kmer_size     = 17
-threads       = $NUM_THREADS
-target_files  = ["$REF"]
-EOF
-
-    measure ReadBouncer --config "$config_file"
+    build_start rb "Building readBouncer index for Gut (d=0.1).."
+    build_readbouncer_index 17
 }
 
 f6() {
-    sleep 2
-    mkdir -p $OUTDIR/rh
-    echo "Building RawHash index for Gut (d=0.1).."
+    build_start rh "Building RawHash index for Gut (d=0.1).."
     measure rawhash2 --r10 -t $NUM_THREADS -d $OUTDIR/rh/gutd0.1.ind -p \
         $RAWHASH_DIR/extern/local_kmer_models/uncalled_r1041_model_only_means.txt \
         $REF
 }
 
 f7() {
-    sleep 2
-    mkdir -p $OUTDIR/sg
-    echo "Building Sigmoni index for Gut (d=0.1).."
+    build_start sg "Building Sigmoni index for Gut (d=0.1).."
     measure sigmoni-index -p $REF \
         -o $OUTDIR/sg --spumoni-path $SPUMONI_BUILD_DIR \
         --poremodel $CODEDIR/sigmoni/poremodel/model_r1041_400bps_dm_it2.tsv
